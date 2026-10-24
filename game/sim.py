@@ -7,7 +7,8 @@ from . import items as IT
 from .config import TILE, DIFFICULTIES, VIEW_DIST
 from .config import VERSION
 from .world import (World, SOLID, ZSOLID, CONTAINER, TILE_NAMES, WORKBENCH, PUMP, MAX_LV, BUILD_D, RESOURCES,
-                    PLACEABLE, BUSH, BUSH_EMPTY, BED, CHEST, WOOD, GRASS, DIRT, FIELD, DIRTROAD)
+                    PLACEABLE, BUSH, BUSH_EMPTY, BED, CHEST, WOOD, GRASS, DIRT, FIELD, DIRTROAD, CAMPFIRE,
+                    CLIMATE_T, GROUNDS)
 
 PCOLORS = [(66, 135, 245), (245, 166, 35), (80, 200, 120), (220, 80, 200), (240, 230, 80), (90, 220, 230),
            (240, 110, 90), (180, 140, 255)]
@@ -17,7 +18,10 @@ ZTYPES = {
     "walker": {"hp": 70, "speed": 56, "dmg": 11, "r": 12},
     "runner": {"hp": 45, "speed": 112, "dmg": 8, "r": 11},
     "brute": {"hp": 320, "speed": 44, "dmg": 26, "r": 15},
+    "deer": {"hp": 55, "speed": 150, "dmg": 0, "r": 11},
+    "wolf": {"hp": 60, "speed": 150, "dmg": 9, "r": 11},
 }
+ANIMALS = ("deer", "wolf")
 NPC_NAMES = ["Михалыч", "Саня", "Петрович", "Лёха", "Дед Иван", "Марина", "Олег", "Кузьмич", "Толян", "Вадим",
              "Ольга", "Серый", "Жека", "Борода", "Шрам", "Клык", "Хромой", "Косой", "Гоша", "Валера", "Нина",
              "Степан", "Рыжий", "Тихий", "Батя", "Костян", "Лиса", "Мирон", "Филин", "Зоя"]
@@ -65,7 +69,12 @@ class Player:
         self.bleed = False
         self.alive = True
         self.inv = []
-        self.eq = {"gun": None, "melee": None, "vest": None, "helmet": None, "bag": None}
+        self.eq = {"gun": None, "melee": None, "vest": None, "helmet": None, "bag": None, "cloth": None, "hat": None}
+        self.temp = 36.6
+        self.amb = 20.0
+        self.infected = False
+        self.fire = False
+        self.fire_t = 0.0
         self.active = "melee"
         self.car = -1
         self.seat = -1
@@ -84,13 +93,14 @@ class Player:
         return {"x": self.x, "y": self.y, "lv": self.lv, "hp": self.hp, "food": self.food, "water": self.water,
                 "stam": self.stam, "bleed": self.bleed, "inv": [_cp(i) for i in self.inv],
                 "eq": {k: _cp(v) for k, v in self.eq.items()}, "active": self.active, "kills": self.kills,
-                "spawn": self.spawn, "alive": self.alive}
+                "spawn": self.spawn, "alive": self.alive, "temp": self.temp, "infected": self.infected}
 
     def restore(self, st):
-        for k in ("hp", "food", "water", "stam", "bleed", "inv", "eq", "active", "kills", "spawn"):
+        for k in ("hp", "food", "water", "stam", "bleed", "inv", "eq", "active", "kills", "spawn", "temp",
+                  "infected"):
             if k in st:
                 setattr(self, k, st[k])
-        self.eq = {k: self.eq.get(k) for k in ("gun", "melee", "vest", "helmet", "bag")}
+        self.eq = {k: self.eq.get(k) for k in ("gun", "melee", "vest", "helmet", "bag", "cloth", "hat")}
 
     def slots(self):
         return BASE_SLOTS + (IT.ITEMS[self.eq["bag"]["id"]]["slots"] if self.eq["bag"] else 0)
@@ -201,6 +211,8 @@ class Sim:
         self.built = {}           # (lv, tx, ty) -> ключ постройки
         self.res_hp = {}
         self.bushes = {}          # собранные кусты -> день сбора
+        self.weather = "clear"
+        self.weather_t = 200.0
         self.loot_mult = self.diff["loot"] * settings.get("loot", 1.0)
         self.zmult = self.diff["zmult"] * settings.get("zombies", 1.0)
         self.spawn_center = self.world.find_spawn(self.rng, 0, 0)
@@ -342,6 +354,9 @@ class Sim:
     def _give_start(self, p):
         p.inv = [IT.make_item("water"), IT.make_item("canned"), IT.make_item("bandage", n=2),
                  IT.make_item("money", n=50)]
+        p.eq["cloth"] = IT.make_item("hoodie")
+        p.temp = 36.6
+        p.infected = False
         if self.diff_key == "easy":
             g = IT.make_item("pistol")
             g["ammo"] = 12
@@ -479,9 +494,14 @@ class Sim:
             p.hp = min(100, p.hp + d.get("hp", 0))
             if d.get("stopbleed"):
                 p.bleed = False
+            if d.get("cure") and p.infected:
+                p.infected = False
+                self._msg(p, "Заражение вылечено")
+            if it["id"] == "meat":
+                self._msg(p, "Сырое мясо вредно - пожарьте его у костра")
             self._consume(p, idx)
             self._to(p, {"k": "snd", "s": "eat" if k != "med" else "med"})
-        elif k in ("gun", "melee", "vest", "helmet", "bag"):
+        elif k in ("gun", "melee", "vest", "helmet", "bag", "cloth", "hat"):
             self._equip(p, idx)
         elif k == "carfix":
             c = self._near_car(p, 110)
@@ -827,7 +847,7 @@ class Sim:
                 return
             self.res_hp.pop(key, None)
             orig = self.world.orig_tile(p.lv, tx, ty)
-            self._edit(p.lv, tx, ty, orig if orig is not None and orig != t else after)
+            self._edit(p.lv, tx, ty, orig if orig is not None and orig != t else (after or self.world.ground(tx, ty)))
             n = self.rng.randint(lo, hi)
             self._give(p, iid, n)
             self._msg(p, "+%d %s" % (n, IT.ITEMS[iid]["name"]))
@@ -894,7 +914,7 @@ class Sim:
             self._msg(p, "Слишком далеко")
             return
         cur = self.world.tile(lv, tx, ty)
-        if cur not in PLACEABLE or (key == "floor" and cur not in (GRASS, DIRT, FIELD, DIRTROAD)):
+        if cur not in PLACEABLE or (key == "floor" and cur not in GROUNDS + (DIRT, FIELD, DIRTROAD)):
             self._msg(p, "Здесь нельзя строить")
             return
         if SOLID[tile] and self._blocked_by_entity(lv, tx, ty):
@@ -933,7 +953,7 @@ class Sim:
             if q.cont == ck:
                 q.cont = None
         orig = self.world.orig_tile(lv, tx, ty)
-        self._edit(lv, tx, ty, orig if orig is not None else GRASS)
+        self._edit(lv, tx, ty, orig if orig is not None else self.world.ground(tx, ty))
         for k, n in BUILD_D[key][2].items():
             if n // 2:
                 self._give(p, k, n // 2)
@@ -1026,7 +1046,7 @@ class Sim:
             return
         z.hp -= dmg
         self._ev({"k": "bl", "x": int(z.x), "y": int(z.y), "lv": z.lv}, z.x, z.y)
-        if src is not None and not isinstance(src, Zombie):
+        if src is not None and not isinstance(src, Zombie) and z.kind != "deer":
             z.target = src
             z.lost = 0
         if kx or ky:
@@ -1034,6 +1054,10 @@ class Sim:
         if z.hp <= 0:
             del self.zombies[z.id]
             self._ev({"k": "zd", "x": int(z.x), "y": int(z.y), "lv": z.lv}, z.x, z.y)
+            if z.kind in ANIMALS:
+                n = self.rng.randint(2, 3) if z.kind == "deer" else self.rng.randint(1, 2)
+                self._drop_bag(z.x, z.y, z.lv, [IT.make_item("meat", n=n), IT.make_item("hide", n=1)], "bag")
+                return
             if isinstance(src, Player):
                 src.kills += 1
             if self.rng.random() < 0.12:
@@ -1377,9 +1401,9 @@ class Sim:
             if lv != z.lv:
                 continue
             d = math.hypot(x - z.x, y - z.y)
-            if d > 900:
+            if d > 900 and z.target is not e:
                 continue
-            sight = 220 if night else 320
+            sight = (220 if night else 320) * (0.85 if self.weather != "clear" else 1.0)
             if isinstance(e, Player):
                 if e.sprint and e.moving:
                     sight *= 1.4
@@ -1387,12 +1411,17 @@ class Sim:
                     c = self.cars.get(e.car)
                     if c and abs(c.spd) > 30:
                         sight *= 1.6
+                cl = e.eq.get("cloth")
+                if cl:
+                    sight *= IT.ITEMS[cl["id"]].get("stealth", 1.0)
+            elif z.kind == "wolf":
+                continue
             if z.target is e:
-                sight = max(sight, 650)
+                sight = max(sight, 1300 if d > 650 else 650)
             if d < sight and d < bd and (d < 50 or self.world.los(z.lv, z.x, z.y, x, y)):
                 best, bd = e, d
         if best:
-            if z.target is None and self.rng.random() < 0.5:
+            if z.target is None and self.rng.random() < 0.5 and z.kind not in ANIMALS:
                 self._ev({"k": "snd", "s": "groan"}, z.x, z.y)
             z.target = best
             z.direct = True
@@ -1438,8 +1467,12 @@ class Sim:
                     self._car_damage(c, z.dmg * 0.6 * (1 - 0.15 * c.up["armor"]))
                     self._ev({"k": "snd", "s": "hit"}, c.x, c.y)
             else:
-                self._damage_player(t, z.dmg, "съеден зомби", bleed=0.18)
+                self._damage_player(t, z.dmg, "загрызен волком" if z.kind == "wolf" else "съеден зомби",
+                                    bleed=0.25 if z.kind == "wolf" else 0.18)
                 self._ev({"k": "bl", "x": int(t.x), "y": int(t.y), "lv": t.lv}, t.x, t.y)
+                if z.kind not in ANIMALS and t.alive and not t.infected and self.rng.random() < 0.07:
+                    t.infected = True
+                    self._msg(t, "Вас заразили! Найдите антибиотики (больница, торговцы)")
         else:
             self._ev({"k": "bl", "x": int(t.x), "y": int(t.y), "lv": t.lv}, t.x, t.y)
             self._damage_npc(t, z.dmg * 0.7, z)
@@ -1461,8 +1494,28 @@ class Sim:
                 z.atk_cd -= dt
             if z.hitcd > 0:
                 z.hitcd -= dt
+            if z.kind == "deer":
+                # олень убегает от людей
+                fx = fy = 0.0
+                for (e, x, y, lv) in cands:
+                    if isinstance(e, Player) and lv == z.lv:
+                        d = math.hypot(z.x - x, z.y - y)
+                        if 0 < d < 340:
+                            fx += (z.x - x) / d
+                            fy += (z.y - y) / d
+                if fx or fy:
+                    ln = math.hypot(fx, fy)
+                    z.a = math.atan2(fy, fx)
+                    z.x, z.y, hit = w.move(z.lv, z.x, z.y, fx / ln * z.speed * dt, fy / ln * z.speed * dt, z.r,
+                                           ZSOLID)
+                    if hit:
+                        z.x, z.y, _ = w.move(z.lv, z.x, z.y, -fy / ln * z.speed * dt, fx / ln * z.speed * dt, z.r,
+                                             ZSOLID)
+                    grid.setdefault((int(z.x // 40), int(z.y // 40), z.lv), []).append(z)
+                    continue
+                z.target = None
             z.think -= dt
-            if z.think <= 0:
+            if z.think <= 0 and z.kind != "deer":
                 z.think = 0.28 + self.rng.random() * 0.1
                 self._zthink(z, cands, night)
             tgt = z.target
@@ -1618,15 +1671,32 @@ class Sim:
         for n in list(self.npcs.values()):
             if n.chunk is None and all(abs(q.x - n.x) + abs(q.y - n.y) > 2800 for q in alive):
                 self._remove_npc(n)
-        if len(self.zombies) > 360:
+        if len(self.zombies) > 380:
             return
-        want = int(15 * self.zmult * (1.7 if night else 1.0))
+        want = int(20 * self.zmult * (1.7 if night else 1.0) * (1 + 0.08 * min(self.day - 1, 10)))
         for p in alive:
             if p.lv != 0:
                 continue
+            # животные за городом
+            pc = self.world.chunk(int(p.x // TILE) >> 5, int(p.y // TILE) >> 5)
+            if pc.biome not in ("downtown", "city"):
+                an = sum(1 for z in self.zombies.values()
+                         if z.kind in ANIMALS and abs(z.x - p.x) < 1300 and abs(z.y - p.y) < 1300)
+                if an < 6 and self.rng.random() < 0.5:
+                    pos = self._outdoor_spot(p, alive)
+                    if pos:
+                        wolf_p = 0.25 + (0.3 if night else 0) + (0.2 if pc.climate == "snow" else 0)
+                        if self.rng.random() < wolf_p:
+                            for _ in range(self.rng.randint(2, 3)):
+                                self._add_zombie("wolf", pos[0] + self.rng.uniform(-30, 30),
+                                                 pos[1] + self.rng.uniform(-30, 30), 0, False)
+                        else:
+                            self._add_zombie("deer", pos[0], pos[1], 0, False)
             cnt = sum(1 for z in self.zombies.values()
-                      if z.lv == 0 and abs(z.x - p.x) < 1300 and abs(z.y - p.y) < 1300)
-            for _ in range(min(3, want - cnt)):
+                      if z.lv == 0 and z.kind not in ANIMALS and abs(z.x - p.x) < 1300 and abs(z.y - p.y) < 1300)
+            local_want = int(want * {"downtown": 1.4, "city": 1.25, "suburb": 1.1, "village": 0.9, "military": 1.2}.get(
+                pc.biome, 0.55))
+            for _ in range(min(3, local_want - cnt)):
                 pos = self._outdoor_spot(p, alive)
                 if pos:
                     r = self.rng.random()
@@ -1666,9 +1736,126 @@ class Sim:
                 n = self._add_npc("bandit" if bandits else "surv", x, y, 0)
                 n.home = (x, y)
 
+    # ---------- события: орда, сброс груза, погода ----------
+    def _horde(self):
+        alive = [p for p in self.players.values() if p.alive and p.lv == 0]
+        if not alive:
+            return
+        size = min(28, int((6 + 2 * self.day) * self.zmult))
+        for p in alive:
+            pos = self._outdoor_spot(p, alive, 900, 1150)
+            if not pos:
+                continue
+            for _ in range(size):
+                x, y = pos[0] + self.rng.uniform(-90, 90), pos[1] + self.rng.uniform(-90, 90)
+                if self.world.circle_free(0, x, y, 12, ZSOLID):
+                    kind = "runner" if self.rng.random() < 0.3 else ("brute" if self.rng.random() < 0.1 else "walker")
+                    z = self._add_zombie(kind, x, y, 0, False)
+                    z.target, z.inv = p, (p.x, p.y)
+        self._all({"k": "msg", "t": "Слышен рёв орды! Ночью держитесь в укрытии"})
+        self._all({"k": "snd", "s": "groan"})
+
+    def _airdrop(self):
+        alive = [p for p in self.players.values() if p.alive]
+        if not alive:
+            return
+        p = self.rng.choice(alive)
+        for _ in range(20):
+            a = self.rng.uniform(-math.pi, math.pi)
+            d = self.rng.uniform(1100, 1800)
+            x, y = p.x + math.cos(a) * d, p.y + math.sin(a) * d
+            if self.world.bid_at(x, y) is None and self.world.circle_free(0, x, y, 16):
+                break
+        else:
+            return
+        self._drop_bag(x, y, 0, IT.roll_loot("drop", self.rng), "drop")
+        for _ in range(int(6 * self.zmult)):
+            zx, zy = x + self.rng.uniform(-150, 150), y + self.rng.uniform(-150, 150)
+            if self.world.circle_free(0, zx, zy, 12, ZSOLID):
+                self._add_zombie("walker" if self.rng.random() < 0.7 else "runner", zx, zy, 0, False)
+        self._all({"k": "msg", "t": "Сброс груза с воздуха! Он отмечен на карте (M) жёлтым парашютом"})
+
+    def _update_weather(self, dt):
+        self.weather_t -= dt
+        if self.weather_t <= 0:
+            r = self.rng.random()
+            self.weather = "clear" if r < 0.55 else ("rain" if r < 0.85 else "storm")
+            self.weather_t = self.rng.uniform(90, 260) if self.weather != "clear" else self.rng.uniform(150, 400)
+
+    def _ambient(self, p):
+        """Температура воздуха вокруг игрока (°C)."""
+        clim = self.world.climate(int(p.x // TILE) >> 5, int(p.y // TILE) >> 5)
+        day, night = CLIMATE_T[clim]
+        h = self.hour()
+        f = max(0.0, math.sin(math.pi * (h - 6) / 14)) if 6 <= h <= 20 else 0.0
+        amb = night + (day - night) * f
+        if self.weather == "rain":
+            amb -= 4
+        elif self.weather == "storm":
+            amb += 3 if clim == "desert" else -7
+        if p.lv > 0 or p.car >= 0 or self.world.bid_at(p.x, p.y) is not None:
+            amb = amb * 0.35 + 18 * 0.65
+        return amb
+
+    def _update_temp(self, p, dt):
+        amb = self._ambient(p)
+        p.amb = amb
+        warm = cool = 0.0
+        for slot in ("cloth", "hat"):
+            it = p.eq.get(slot)
+            if it:
+                warm += IT.ITEMS[it["id"]].get("warm", 0)
+                cool += IT.ITEMS[it["id"]].get("cool", 0)
+        p.fire_t -= dt
+        if p.fire_t <= 0:
+            p.fire_t = 0.5
+            tx, ty = int(p.x // TILE), int(p.y // TILE)
+            p.fire = any(self.world.tile(p.lv, tx + ox, ty + oy) == CAMPFIRE
+                         for oy in range(-3, 4) for ox in range(-3, 4))
+        eff = amb
+        if amb < 22:
+            eff += warm * 5
+        if amb > 24:
+            eff -= cool * 5
+        if p.fire:
+            eff += 16
+        if p.sprint and p.moving:
+            eff += 3
+        target = max(32.0, min(40.5, 36.6 + (eff - 20) * 0.075))
+        p.temp += (target - p.temp) * min(1.0, dt * 0.04)
+        reason = None
+        if p.temp < 35.5:
+            p.hp -= (0.35 if p.temp > 34.5 else 1.0) * dt
+            reason = "замёрз насмерть"
+        elif p.temp > 37.8:
+            p.water -= 0.25 * dt
+            if p.temp > 38.6:
+                p.hp -= 0.5 * dt
+                reason = "умер от теплового удара"
+        return reason
+
+    def _a_cook(self, p, m):
+        if not p.fire:
+            self._msg(p, "Нужен костёр рядом")
+            return
+        n = self._take_items(p, "meat", 999)
+        if not n:
+            self._msg(p, "Нет сырого мяса")
+            return
+        self._give(p, "cooked_meat", n)
+        self._msg(p, "Пожарено мяса: %d" % n)
+        self._to(p, {"k": "snd", "s": "eat"})
+
     # ---------- главный цикл ----------
     def update(self, dt):
+        h0 = self.hour()
         self.tod += dt / (self.settings.get("day_len", 12) * 60)
+        h1 = self.hour()
+        if h0 < 21 <= h1:
+            self._horde()
+        if h0 < 12 <= h1:
+            self._airdrop()
+        self._update_weather(dt)
         if self.tod >= 1:
             self.tod -= 1
             self.day += 1
@@ -1722,14 +1909,18 @@ class Sim:
             else:
                 p.x, p.y, p.lv = c.x, c.y, 0
         mult = self.diff["hunger"]
-        p.food -= 0.13 * mult * dt
-        p.water -= 0.17 * mult * dt
+        p.food -= 0.17 * mult * dt
+        p.water -= 0.22 * mult * dt
         if p.sprint and p.moving and p.car < 0 and p.stam > 0:
             p.stam -= 22 * dt
             p.water -= 0.05 * dt
         else:
-            p.stam += (14 if p.food > 15 else 6) * dt
-        reason = None
+            p.stam += (14 if p.food > 15 and p.temp > 35.5 else 6) * dt
+        reason = self._update_temp(p, dt)
+        if p.infected:
+            p.hp -= 0.22 * dt
+            p.food -= 0.04 * dt
+            reason = "умер от заражения"
         if p.food <= 0:
             p.hp -= 0.6 * dt
             reason = "умер от голода"
@@ -1739,8 +1930,8 @@ class Sim:
         if p.bleed:
             p.hp -= 1.1 * dt
             reason = "истёк кровью"
-        if p.food > 50 and p.water > 50 and not p.bleed:
-            p.hp += 0.25 * dt
+        if p.food > 50 and p.water > 50 and not p.bleed and not p.infected and 35.8 < p.temp < 37.6:
+            p.hp += 0.2 * dt
         p.hp = min(100.0, p.hp)
         p.food = min(100.0, max(0.0, p.food))
         p.water = min(100.0, max(0.0, p.water))
@@ -1810,7 +2001,9 @@ class Sim:
         R = VIEW_DIST
         P = [[q.id, q.name, round(q.x, 1), round(q.y, 1), q.lv, round(q.a, 2), int(q.hp), int(q.alive), q.car,
               q.seat, self._wpn(q), q.eq["vest"]["id"] if q.eq["vest"] else "",
-              q.eq["helmet"]["id"] if q.eq["helmet"] else "", q.color] for q in self.players.values()]
+              q.eq["helmet"]["id"] if q.eq["helmet"] else "", q.color,
+              q.eq["cloth"]["id"] if q.eq.get("cloth") else "", q.eq["hat"]["id"] if q.eq.get("hat") else ""]
+             for q in self.players.values()]
         Z = [[z.id, z.kind, round(z.x, 1), round(z.y, 1), z.lv, round(z.a, 2), round(z.hp / z.maxhp, 2)]
              for z in self.zombies.values() if abs(z.x - vx) < R and abs(z.y - vy) < R]
         N = [[n.id, n.kind, n.name, round(n.x, 1), round(n.y, 1), n.lv, round(n.a, 2), round(n.hp / n.maxhp, 2),
@@ -1826,7 +2019,8 @@ class Sim:
               "eq": {k: _cp(v) for k, v in p.eq.items()}, "act": p.active, "slots": p.slots(),
               "rl": (1 - p.reload_t / p.reload_total) if p.reload_t > 0 else -1, "tpn": p.tpn, "tp": p.tp,
               "kills": p.kills, "rsp": p.respawn_t if (not p.alive and self.settings.get("respawn")) else -1,
-              "car": p.car, "seat": p.seat, "trade": None}
+              "car": p.car, "seat": p.seat, "trade": None, "temp": round(p.temp, 2), "amb": round(p.amb, 1),
+              "inf": p.infected, "fire": p.fire}
         n = self._trader(p) if p.trade is not None else None
         if n:
             me["trade"] = {"id": n.id, "name": "%s %s" % (NPC_TITLE[n.kind], n.name), "money": n.money,
@@ -1837,7 +2031,7 @@ class Sim:
             if items is not None:
                 if p.cont.startswith("bag:"):
                     b = self.bags.get(int(p.cont[4:]))
-                    name = "Тело" if b and b.kind == "body" else "Вещи на земле"
+                    name = {"body": "Тело", "drop": "Груз с воздуха"}.get(b.kind if b else "", "Вещи на земле")
                 else:
                     lv, tx, ty = (int(v) for v in p.cont.split(","))
                     name = TILE_NAMES.get(self.world.tile(lv, tx, ty), "Контейнер")
@@ -1850,4 +2044,5 @@ class Sim:
             elif lv == -1 or (abs(x - vx) < 1400 and abs(y - vy) < 1000):
                 ev.append(e)
         return {"t": "s", "tod": round(self.tod, 4), "day": self.day, "P": P, "Z": Z, "N": N, "C": C, "B": B,
-                "me": me, "cont": cont, "ev": ev, "over": self.over}
+                "me": me, "cont": cont, "ev": ev, "over": self.over, "W": self.weather,
+                "D": [[int(b.x), int(b.y)] for b in self.bags.values() if b.kind == "drop"]}

@@ -81,6 +81,24 @@ _add("stone_axe", "Каменный топор", "melee", "Рубит дерев
      color=(130, 120, 110))
 _add("pickaxe", "Кирка", "melee", "Разбивает камни быстрее", dmg=20, rate=0.7, range=52, mine=3,
      color=(110, 110, 120))
+# --- одежда (warm - греет в холод, cool - спасает от жары; минус - наоборот) ---
+_add("tshirt", "Футболка", "cloth", "Лёгкая: прохладнее в жару", warm=0, cool=1, color=(225, 225, 230))
+_add("hoodie", "Толстовка", "cloth", "Немного греет", warm=1, cool=0, color=(90, 110, 160))
+_add("jacket", "Куртка", "cloth", "Хорошо греет", warm=2, cool=-0.5, color=(120, 90, 60))
+_add("winter_jacket", "Пуховик", "cloth", "Очень тёплый, в жару тяжело", warm=4, cool=-2, color=(200, 60, 50))
+_add("fur_coat", "Меховая шуба", "cloth", "Самая тёплая одежда", warm=5, cool=-2.5, color=(150, 110, 70))
+_add("desert_cloak", "Накидка кочевника", "cloth", "Защищает от жары пустыни", warm=0.5, cool=3,
+     color=(215, 195, 145))
+_add("camo", "Камуфляж", "cloth", "Зомби замечают вас позже", warm=1, cool=0.5, stealth=0.72, color=(80, 100, 60))
+_add("cap", "Кепка", "hat", "Спасает от солнца", warm=0, cool=1, color=(200, 60, 60))
+_add("beanie", "Шапка", "hat", "Греет голову", warm=1.5, cool=-0.5, color=(60, 70, 120))
+# --- охота и медицина ---
+_add("meat", "Сырое мясо", "food", "Пожарьте у костра (E) - сырое вредно", 10, food=12, hp=-8,
+     color=(200, 80, 80))
+_add("cooked_meat", "Жареное мясо", "food", "Очень сытное", 10, food=40, water=-3, color=(150, 90, 50))
+_add("hide", "Шкура", "res", "Для тёплой одежды (B)", 20, color=(140, 110, 80))
+_add("antibiotics", "Антибиотики", "med", "Лечат заражение от укусов", 5, hp=5, cure=True,
+     color=(120, 200, 230))
 ITEMS["axe"]["chop"] = 3
 ITEMS["machete"]["chop"] = 2
 ITEMS["crowbar"]["mine"] = 2
@@ -92,6 +110,9 @@ CRAFTS = [
     ("bandage", {"berries": 3, "wood": 1}),
     ("bat", {"wood": 5}),
     ("nails", {"scrap": 2, "wood": 1}),
+    ("beanie", {"hide": 1}),
+    ("desert_cloak", {"hide": 2, "wood": 1}),
+    ("fur_coat", {"hide": 4}),
 ]
 CRAFT_D = dict(CRAFTS)
 
@@ -104,6 +125,8 @@ VALUES = {
     "bag3": 220, "scrap": 5, "engine_part": 40, "tire": 30, "battery": 50, "tools": 70, "fuel": 35,
     "repair_kit": 60, "silencer": 150, "ext_mag": 120, "scope": 140, "nails": 40, "flashlight": 30, "money": 1,
     "wood": 2, "stone": 2, "berries": 2, "stone_axe": 18, "pickaxe": 20,
+    "tshirt": 8, "hoodie": 20, "jacket": 45, "winter_jacket": 90, "fur_coat": 120, "desert_cloak": 60, "camo": 110,
+    "cap": 10, "beanie": 15, "meat": 6, "cooked_meat": 15, "hide": 12, "antibiotics": 60,
 }
 
 
@@ -162,6 +185,21 @@ LOOT = {
 }
 for _k in ("desk", "wardrobe", "cabinet", "locker", "milcrate"):
     LOOT[_k][2].append(("money", {"desk": 2.5, "wardrobe": 1.2}.get(_k, 0.5)))
+for _k, _extra in (("wardrobe", [("tshirt", 1.5), ("hoodie", 1.2), ("jacket", 0.8), ("winter_jacket", 0.4),
+                                 ("cap", 1), ("beanie", 0.8), ("desert_cloak", 0.25)]),
+                   ("locker", [("camo", 0.4), ("antibiotics", 0.3)]),
+                   ("milcrate", [("camo", 0.8), ("winter_jacket", 0.3)]),
+                   ("medcab", [("antibiotics", 1.4)]),
+                   ("desk", [("antibiotics", 0.25)]),
+                   ("trader", [("jacket", 0.5), ("winter_jacket", 0.4), ("desert_cloak", 0.4), ("antibiotics", 0.8),
+                               ("cooked_meat", 1), ("beanie", 0.5), ("camo", 0.2)])):
+    LOOT[_k][2].extend(_extra)
+# груз с воздуха
+LOOT["drop"] = (5, 8, [("rifle", 1), ("sniper", 0.5), ("shotgun", 0.6), ("a762", 3), ("a12", 1.5), ("vest3", 0.6),
+                       ("vest2", 0.8), ("helmet2", 0.7), ("medkit", 1.5), ("antibiotics", 1.2), ("mre", 2),
+                       ("silencer", 0.5), ("scope", 0.5), ("ext_mag", 0.5), ("camo", 0.5), ("bag3", 0.4),
+                       ("winter_jacket", 0.4), ("fuel", 0.8), ("money", 1)])
+STACK_ROLL["hide"] = (1, 2)
 
 
 # Тюнинг машин: ключ, название, описание, стоимость каждого уровня

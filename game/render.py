@@ -11,6 +11,7 @@ from .world import (GRASS, ROAD, ROADV, ROADH, SIDEWALK, WOOD, TILEF, CONCRETE, 
                     WATER, FENCE, VOID, UP, DOWN, FIELD, DIRTROAD, FRIDGE, CABINET, WARDROBE, DESK, SHELF, MEDCAB,
                     LOCKER, CRATE, MILCRATE, TOOLBOX, BED, TABLE, SOFA, WORKBENCH, COUNTER, PUMP, CAMPFIRE,
                     ROCK, BUSH, BUSH_EMPTY, WOODWALL, STONEWALL, WOODDOOR, PATH, CHEST,
+                    SAND, SNOW, CACTUS, PINE, DEADBUSH, BRIDGE, ICE,
                     FLOOR_OF, KIND_LABEL, GABLE, CS)
 
 CH = 16
@@ -19,9 +20,12 @@ MINI = {GRASS: (62, 110, 52), ROAD: (58, 58, 62), ROADV: (58, 58, 62), ROADH: (5
         WATER: (40, 90, 160), FENCE: (90, 90, 90), PUMP: (200, 50, 40), MILCRATE: (90, 100, 60),
         FIELD: (130, 120, 55), DIRTROAD: (130, 105, 70), CAMPFIRE: (255, 150, 40), ROCK: (120, 120, 125),
         BUSH: (60, 120, 50), BUSH_EMPTY: (60, 100, 50), WOODWALL: (120, 80, 45), STONEWALL: (110, 110, 115),
-        WOODDOOR: (150, 100, 55), PATH: (175, 160, 130), WOOD: (140, 100, 62), CHEST: (150, 100, 50)}
-FLOORS = (GRASS, ROAD, ROADV, ROADH, SIDEWALK, WOOD, TILEF, CONCRETE, DIRT, WATER, FIELD, DIRTROAD, PATH)
-NATURE = (ROCK, BUSH, BUSH_EMPTY)
+        WOODDOOR: (150, 100, 55), PATH: (175, 160, 130), WOOD: (140, 100, 62), CHEST: (150, 100, 50),
+        SAND: (214, 190, 128), SNOW: (226, 232, 240), CACTUS: (80, 140, 70), PINE: (30, 70, 50),
+        DEADBUSH: (150, 120, 80), BRIDGE: (140, 100, 60), ICE: (170, 210, 235)}
+FLOORS = (GRASS, ROAD, ROADV, ROADH, SIDEWALK, WOOD, TILEF, CONCRETE, DIRT, WATER, FIELD, DIRTROAD, PATH, SAND, SNOW,
+          BRIDGE, ICE)
+NATURE = (ROCK, BUSH, BUSH_EMPTY, CACTUS, PINE, DEADBUSH)
 
 
 def _h(tx, ty):
@@ -75,6 +79,29 @@ def draw_floor(s, t, x, y, tx, ty):
         for k in range(4):
             pygame.draw.line(s, (95, 150, 60) if (h >> 3) % 5 else (170, 160, 60), (x + 4 + k * 8, y + 2),
                              (x + 4 + k * 8, y + 30), 4)
+    elif t == SAND:
+        pygame.draw.rect(s, (214 + h % 8, 190 + h % 6, 128), (x, y, TILE, TILE))
+        for k in range(4):
+            pygame.draw.rect(s, (190, 166, 108), (x + (h >> k) % 29, y + (h >> (k + 3)) % 29, 3, 2))
+        if h % 5 == 0:
+            pygame.draw.arc(s, (196, 172, 112), (x + 2, y + 8, 28, 14), 0.3, 2.8, 2)
+    elif t == SNOW:
+        pygame.draw.rect(s, (224 + h % 8, 230 + h % 6, 240), (x, y, TILE, TILE))
+        for k in range(3):
+            pygame.draw.rect(s, (200, 210, 225), (x + (h >> k) % 29, y + (h >> (k + 4)) % 29, 3, 2))
+        if h % 7 == 0:
+            pygame.draw.circle(s, (255, 255, 255), (x + h % 28 + 2, y + (h >> 5) % 28 + 2), 2)
+    elif t == ICE:
+        pygame.draw.rect(s, (170, 210, 235), (x, y, TILE, TILE))
+        pygame.draw.line(s, (210, 235, 250), (x + h % 20, y + 4), (x + h % 20 + 10, y + 16), 2)
+        pygame.draw.line(s, (140, 185, 215), (x + 4, y + 26), (x + 20, y + (h >> 3) % 20 + 6), 1)
+    elif t == BRIDGE:
+        pygame.draw.rect(s, (40, 90, 160), (x, y, TILE, TILE))
+        pygame.draw.rect(s, (140, 100, 60), (x, y + 2, TILE, TILE - 4))
+        for k in range(0, TILE, 6):
+            pygame.draw.line(s, (100, 70, 40), (x + k, y + 2), (x + k, y + TILE - 3), 1)
+        pygame.draw.line(s, (90, 60, 35), (x, y + 2), (x + TILE, y + 2), 2)
+        pygame.draw.line(s, (90, 60, 35), (x, y + TILE - 3), (x + TILE, y + TILE - 3), 2)
     elif t == PATH:
         pygame.draw.rect(s, (110, 150, 80), (x, y, TILE, TILE))
         for i in range(2):
@@ -202,6 +229,24 @@ def draw_tile(s, t, x, y, tx, ty, under):
         pygame.draw.rect(s, (200, 50, 40), (x + 8, y + 4, 16, 24), border_radius=3)
         pygame.draw.rect(s, (240, 240, 240), (x + 11, y + 8, 10, 6))
         pygame.draw.line(s, (30, 30, 30), (x + 24, y + 14), (x + 29, y + 24), 2)
+    elif t == PINE:
+        pygame.draw.circle(s, (20, 45, 30), (x + 16, y + 17), 15)
+        for k, r in enumerate((14, 10, 6)):
+            pygame.draw.circle(s, (30 + k * 12, 70 + k * 15, 45 + k * 8), (x + 16, y + 16), r)
+        pygame.draw.circle(s, (240, 245, 250), (x + 12, y + 11), 4)
+        pygame.draw.circle(s, (240, 245, 250), (x + 20, y + 20), 3)
+    elif t == CACTUS:
+        pygame.draw.rect(s, (60, 120, 55), (x + 12, y + 3, 8, 26), border_radius=4)
+        pygame.draw.rect(s, (60, 120, 55), (x + 4, y + 10, 8, 5), border_radius=2)
+        pygame.draw.rect(s, (60, 120, 55), (x + 4, y + 6, 5, 9), border_radius=2)
+        pygame.draw.rect(s, (60, 120, 55), (x + 20, y + 14, 8, 5), border_radius=2)
+        pygame.draw.rect(s, (60, 120, 55), (x + 23, y + 9, 5, 10), border_radius=2)
+        pygame.draw.line(s, (100, 170, 90), (x + 15, y + 5), (x + 15, y + 27), 1)
+    elif t == DEADBUSH:
+        for k in range(6):
+            a = k * 1.05
+            pygame.draw.line(s, (130, 100, 65), (x + 16, y + 18),
+                             (x + 16 + int(math.cos(a) * 12), y + 18 + int(math.sin(a) * 10) - 4), 2)
     elif t == ROCK:
         pygame.draw.polygon(s, (95, 95, 100), [(x + 4, y + 24), (x + 8, y + 8), (x + 20, y + 4), (x + 29, y + 14),
                                                (x + 27, y + 28), (x + 10, y + 29)])
@@ -261,8 +306,8 @@ class Renderer:
         o = self.world.orig_tile(0, tx, ty)
         if o in FLOORS:
             return o
-        if t in NATURE:
-            return GRASS
+        if t in NATURE or t in (WOODWALL, STONEWALL, WOODDOOR, CHEST, BED):
+            return self.world.ground(tx, ty)
         return CONCRETE if t == PUMP else DIRT
 
     def invalidate(self, lv, tx, ty):
@@ -451,8 +496,12 @@ class Renderer:
         screen.blit(spr, (x - spr.get_width() // 2, y - spr.get_height() // 2))
 
 
-def draw_player(screen, x, y, a, color, weapon, vest, helmet):
+def draw_player(screen, x, y, a, color, weapon, vest, helmet, cloth="", hat=""):
     ca, sa = math.cos(a), math.sin(a)
+    if cloth in IT.ITEMS:  # одежда - широкие плечи под телом
+        cc = IT.ITEMS[cloth]["color"]
+        for side in (-1, 1):
+            pygame.draw.circle(screen, cc, (int(x - sa * 9 * side), int(y + ca * 9 * side)), 7)
     wd = IT.ITEMS.get(weapon)
     if wd and wd["kind"] == "gun":
         ln = 26 if weapon in ("rifle", "sniper", "shotgun") else 20
@@ -469,10 +518,45 @@ def draw_player(screen, x, y, a, color, weapon, vest, helmet):
         pygame.draw.circle(screen, (220, 180, 140), (int(hx), int(hy)), 4)
     pygame.draw.circle(screen, (20, 20, 20), (int(x), int(y)), 13)
     pygame.draw.circle(screen, color, (int(x), int(y)), 12)
+    if cloth in IT.ITEMS:
+        pygame.draw.circle(screen, IT.ITEMS[cloth]["color"], (int(x), int(y)), 12, 5)
     if vest:
         pygame.draw.circle(screen, IT.ITEMS[vest]["color"], (int(x), int(y)), 12, 4)
-    hc = IT.ITEMS[helmet]["color"] if helmet else (90, 60, 40)
+    hc = IT.ITEMS[helmet]["color"] if helmet else (IT.ITEMS[hat]["color"] if hat in IT.ITEMS else (90, 60, 40))
     pygame.draw.circle(screen, hc, (int(x - ca * 2), int(y - sa * 2)), 7)
+    if hat == "cap" and not helmet:
+        pygame.draw.circle(screen, hc, (int(x + ca * 5), int(y + sa * 5)), 4)
+
+
+def draw_animal(screen, x, y, a, kind, frac):
+    ca, sa = math.cos(a), math.sin(a)
+    if kind == "deer":
+        body, head = (150, 105, 60), (170, 125, 75)
+    else:
+        body, head = (110, 110, 115), (140, 140, 145)
+    # тело-эллипс, повёрнутое по направлению
+    pts = [(x + ca * 16 * math.cos(t) - sa * 8 * math.sin(t), y + sa * 16 * math.cos(t) + ca * 8 * math.sin(t))
+           for t in [i * math.pi / 8 for i in range(16)]]
+    pygame.draw.polygon(screen, (30, 25, 20), [(px + 1, py + 1) for px, py in pts])
+    pygame.draw.polygon(screen, body, pts)
+    hx, hy = x + ca * 17, y + sa * 17
+    pygame.draw.circle(screen, head, (int(hx), int(hy)), 6)
+    if kind == "deer":
+        for side in (-1, 1):
+            bx, by = hx - sa * 3 * side, hy + ca * 3 * side
+            ex, ey = bx + ca * 6 - sa * 7 * side, by + sa * 6 + ca * 7 * side
+            pygame.draw.line(screen, (90, 65, 40), (bx, by), (ex, ey), 2)
+            pygame.draw.line(screen, (90, 65, 40), (ex, ey), (ex + ca * 4, ey + sa * 4), 2)
+        pygame.draw.circle(screen, (240, 240, 230), (int(x - ca * 15), int(y - sa * 15)), 3)
+    else:
+        for side in (-1, 1):
+            pygame.draw.circle(screen, body, (int(hx - ca * 2 - sa * 4 * side), int(hy - sa * 2 + ca * 4 * side)), 3)
+        pygame.draw.circle(screen, (240, 200, 60), (int(hx + ca * 3 - sa * 2), int(hy + sa * 3 + ca * 2)), 1)
+        pygame.draw.circle(screen, (240, 200, 60), (int(hx + ca * 3 + sa * 2), int(hy + sa * 3 - ca * 2)), 1)
+        pygame.draw.line(screen, body, (x - ca * 15, y - sa * 15), (x - ca * 24, y - sa * 24), 4)
+    if frac < 0.99:
+        pygame.draw.rect(screen, (40, 0, 0), (x - 14, y - 20, 28, 4))
+        pygame.draw.rect(screen, (220, 40, 40), (x - 14, y - 20, int(28 * frac), 4))
 
 
 ZCOL = {"walker": (95, 130, 85), "runner": (140, 110, 80), "brute": (75, 95, 70)}
@@ -497,6 +581,15 @@ def draw_zombie(screen, x, y, a, kind, frac):
 
 
 def draw_bag(screen, x, y, kind):
+    if kind == "drop":
+        pygame.draw.ellipse(screen, (240, 200, 60), (x - 26, y - 34, 52, 26))
+        pygame.draw.ellipse(screen, (200, 150, 40), (x - 26, y - 34, 52, 26), 2)
+        for ox in (-20, 0, 20):
+            pygame.draw.line(screen, (230, 230, 230), (x + ox, y - 18), (x, y - 6), 1)
+        pygame.draw.rect(screen, (80, 95, 60), (x - 13, y - 8, 26, 20), border_radius=2)
+        pygame.draw.rect(screen, (40, 50, 30), (x - 13, y - 8, 26, 20), 2, border_radius=2)
+        pygame.draw.line(screen, (230, 200, 60), (x - 13, y + 2), (x + 13, y + 2), 3)
+        return
     if kind == "body":
         pygame.draw.ellipse(screen, (90, 20, 20), (x - 16, y - 10, 32, 20))
         pygame.draw.rect(screen, (110, 80, 50), (x - 8, y - 8, 16, 16), border_radius=3)
@@ -514,7 +607,7 @@ def draw_icon(s, rect, iid):
     c = d.get("color", (180, 180, 180))
     cx, cy = r.center
     k = d["kind"]
-    if k == "food" and iid != "berries":
+    if k == "food" and iid not in ("berries", "meat", "cooked_meat"):
         if iid in ("apple",):
             pygame.draw.circle(s, c, (cx, cy + 2), r.w // 4)
             pygame.draw.line(s, (60, 120, 40), (cx, cy - r.h // 4), (cx + 4, cy - r.h // 3), 3)
@@ -540,6 +633,23 @@ def draw_icon(s, rect, iid):
     elif k == "ammo":
         for i in range(3):
             pygame.draw.rect(s, c, (cx - 10 + i * 8, cy - 8, 5, 16), border_radius=2)
+    elif k == "cloth":
+        pygame.draw.polygon(s, c, [(cx - 14, cy - 8), (cx - 6, cy - 13), (cx + 6, cy - 13), (cx + 14, cy - 8),
+                                   (cx + 10, cy - 2), (cx + 8, cy - 4), (cx + 8, cy + 13), (cx - 8, cy + 13),
+                                   (cx - 8, cy - 4), (cx - 10, cy - 2)])
+        pygame.draw.polygon(s, _shade(c, 0.6), [(cx - 14, cy - 8), (cx - 6, cy - 13), (cx + 6, cy - 13),
+                                                (cx + 14, cy - 8), (cx + 10, cy - 2), (cx + 8, cy - 4),
+                                                (cx + 8, cy + 13), (cx - 8, cy + 13), (cx - 8, cy - 4),
+                                                (cx - 10, cy - 2)], 1)
+    elif k == "hat":
+        pygame.draw.circle(s, c, (cx, cy + 2), 10, draw_top_left=True, draw_top_right=True)
+        pygame.draw.rect(s, _shade(c, 0.7), (cx - 13 if iid == "cap" else cx - 11, cy + 1, 24, 4))
+    elif iid in ("meat", "cooked_meat"):
+        pygame.draw.ellipse(s, c, (cx - 12, cy - 8, 22, 16))
+        pygame.draw.line(s, (235, 225, 210), (cx + 8, cy), (cx + 14, cy + 6), 4)
+    elif iid == "hide":
+        pygame.draw.ellipse(s, c, (cx - 13, cy - 10, 26, 20))
+        pygame.draw.ellipse(s, _shade(c, 0.7), (cx - 8, cy - 6, 16, 12), 2)
     elif k in ("vest", "helmet"):
         if k == "vest":
             pygame.draw.rect(s, c, (cx - 12, cy - 12, 24, 26), border_radius=5)

@@ -8,21 +8,21 @@ from . import items as IT
 from . import sound
 from . import ui
 from .config import TILE, SCREEN_W, SCREEN_H, DIFFICULTIES
-from .render import Renderer, draw_player, draw_zombie, draw_bag, draw_icon
+from .render import Renderer, draw_player, draw_zombie, draw_bag, draw_icon, draw_animal
+from .world import area_name
 from .world import (World, UP, DOWN, CONTAINER, TILE_NAMES, WORKBENCH, PUMP, CAMPFIRE, KIND_LABEL, CS, BUSH, BED,
                     BUILDS, BUILD_D, PLACEABLE, SOLID, GRASS, DIRT, FIELD, DIRTROAD)
 
-BIOME_NAMES = {"downtown": "Центр города", "city": "Город", "suburb": "Пригород", "farm": "Фермы", "forest": "Лес",
-               "park": "Парк", "wild": "Пустошь", "military": "Военная база", "trader": "Лагерь торговцев",
-               "bandits": "Лагерь бандитов"}
 NPC_COLORS = {"trader": (210, 170, 60), "guard": (70, 140, 80), "surv": (100, 170, 110), "bandit": (150, 45, 45)}
 NPC_TITLE = {"trader": "Торговец", "guard": "Охранник", "surv": "Выживший", "bandit": "Бандит"}
 
 PLAYER_R = 12
 SLOT = 58
 GAP = 6
-EQ_SLOTS = [("gun", "Огнестрел"), ("melee", "Ближний бой"), ("vest", "Бронежилет"), ("helmet", "Шлем"),
-            ("bag", "Рюкзак")]
+EQ_SLOTS = [("gun", "Огнестрел"), ("melee", "Ближний"), ("vest", "Броня"), ("helmet", "Шлем"),
+            ("cloth", "Одежда"), ("hat", "Шапка"), ("bag", "Рюкзак")]
+ANIMALS = ("deer", "wolf")
+MAP_ZOOMS = [0.75, 1, 1.5, 2, 3, 4, 6]
 
 
 def _lerp_ang(a, b, k):
@@ -42,6 +42,13 @@ class GameScene:
             self.world.load_edits(edits)
         self.build_ui = False
         self.build_sel = None
+        self.weather = "clear"
+        self.drops = []
+        self.wparts = []
+        self.waypoint = None
+        self.map_zoom = 3
+        self.map_center = None
+        self.map_drag = False
         self.r = Renderer(self.world)
         self.diff = diff
         self.settings = settings
@@ -100,13 +107,14 @@ class GameScene:
             self.driving = False
         seen = set()
         for row in s["P"]:
-            pid, name, x, y, lv, a, hp, alive, car, seat, wpn, vest, helm, color = row
+            pid, name, x, y, lv, a, hp, alive, car, seat, wpn, vest, helm, color = row[:14]
+            cloth, hat = (row[14], row[15]) if len(row) > 15 else ("", "")
             d = self.players.get(pid)
             if d is None or abs(d["rx"] - x) > 300 or abs(d["ry"] - y) > 300 or d["lv"] != lv:
                 d = {"rx": x, "ry": y, "ra": a}
                 self.players[pid] = d
             d.update(id=pid, name=name, x=x, y=y, lv=lv, a=a, hp=hp, alive=alive, car=car, seat=seat, wpn=wpn,
-                     vest=vest, helm=helm, color=tuple(color))
+                     vest=vest, helm=helm, color=tuple(color), cloth=cloth, hat=hat)
             seen.add(pid)
         for pid in list(self.players):
             if pid not in seen:
@@ -147,6 +155,8 @@ class GameScene:
             if nid not in seen:
                 del self.npcs[nid]
         self.bags = s["B"]
+        self.weather = s.get("W", "clear")
+        self.drops = s.get("D", [])
         if s.get("over"):
             self.over = True
         for e in s["ev"]:
@@ -209,6 +219,7 @@ class GameScene:
     # ---------------- обновление ----------------
     def update(self, dt):
         self.time += dt
+        self.last_dt = dt
         if self.host:
             self.host.paused = (not self.mp) and self.paused
             self.host.update(dt)
@@ -269,7 +280,7 @@ class GameScene:
         self.groan_t -= dt
         if self.groan_t <= 0:
             self.groan_t = random.uniform(3, 7)
-            near = [z for z in self.zombies.values() if z["lv"] == self.vlv and
+            near = [z for z in self.zombies.values() if z["lv"] == self.vlv and z["kind"] not in ANIMALS and
                     math.hypot(z["rx"] - self.vx, z["ry"] - self.vy) < 500]
             if near:
                 z = random.choice(near)
@@ -524,6 +535,8 @@ class GameScene:
                         lambda: self.link.send({"t": "setspawn", "tx": ttx, "ty": tty}))
             key = "%d,%d,%d" % (self.plv, ttx, tty)
             return ("E - обыскать: %s" % TILE_NAMES.get(tt, ""), lambda: self._open(key))
+        if self.me.get("fire") and any(it["id"] == "meat" for it in self.me["inv"]):
+            return ("E - пожарить мясо на костре", lambda: self.link.send({"t": "cook"}))
         if self.plv == 0:
             for c in self.cars.values():
                 if not c["wreck"] and math.hypot(c["rx"] - self.px, c["ry"] - self.py) < 80:
@@ -553,7 +566,7 @@ class GameScene:
     def _area_name(self):
         tx, ty = int(self.vx // TILE), int(self.vy // TILE)
         c = self.world.chunks.get((tx >> 5, ty >> 5))
-        return BIOME_NAMES.get(c.biome, "Улица") if c else "Улица"
+        return area_name(c.biome, c.climate) if c else "Улица"
 
     def _open_shop(self):
         self.shop_open = True
@@ -577,6 +590,8 @@ class GameScene:
             else:
                 self.chat.handle(e)
             return
+        if self.map_open and not self.paused and self._map_event(e):
+            return
         if e.type == pygame.MOUSEBUTTONDOWN:
             for rect, btn, fn in reversed(self.zones):
                 if btn == e.button and rect.collidepoint(e.pos):
@@ -595,7 +610,7 @@ class GameScene:
                     i = others.index(self.spec) + 1 if self.spec in others else 0
                     self.spec = others[i % len(others)]
             return
-        if e.type == pygame.MOUSEWHEEL and self.me and not (self.inv_open or self.shop_open):
+        if e.type == pygame.MOUSEWHEEL and self.me and not (self.inv_open or self.shop_open or self.map_open):
             self.link.send({"t": "swap"})
             return
         if e.type != pygame.KEYDOWN:
@@ -719,6 +734,7 @@ class GameScene:
                 x, y = self.w2s(e["x"], e["y"])
                 pygame.draw.circle(screen, (255, 170, 60), (int(x), int(y)), int(110 * (1 - e["t"] / 0.5)) + 10, 6)
         self._draw_darkness(screen)
+        self._draw_weather(screen, getattr(self, "last_dt", 1 / 60))
         if self.build_sel and not self.build_ui and self.me["alive"]:
             self._draw_ghost(screen)
         if self.hurt_t > 0:
@@ -777,7 +793,10 @@ class GameScene:
             if self._visible(z["rx"], z["ry"], z["lv"]):
                 sx, sy = self.w2s(z["rx"], z["ry"])
                 if -40 < sx < SCREEN_W + 40 and -40 < sy < SCREEN_H + 40:
-                    draw_zombie(screen, sx, sy, z["ra"], z["kind"], z["f"])
+                    if z["kind"] in ANIMALS:
+                        draw_animal(screen, sx, sy, z["ra"], z["kind"], z["f"])
+                    else:
+                        draw_zombie(screen, sx, sy, z["ra"], z["kind"], z["f"])
         for n in self.npcs.values():
             if not self._visible(n["rx"], n["ry"], n["lv"]):
                 continue
@@ -800,12 +819,15 @@ class GameScene:
                 w = self._my_weapon()
                 vest = (self.me["eq"].get("vest") or {}).get("id", "")
                 helm = (self.me["eq"].get("helmet") or {}).get("id", "")
+                cloth = (self.me["eq"].get("cloth") or {}).get("id", "")
+                hat = (self.me["eq"].get("hat") or {}).get("id", "")
             else:
                 x, y, lv_, a, w, vest, helm = p["rx"], p["ry"], p["lv"], p["ra"], p["wpn"], p["vest"], p["helm"]
+                cloth, hat = p.get("cloth", ""), p.get("hat", "")
             if not self._visible(x, y, lv_):
                 continue
             sx, sy = self.w2s(x, y)
-            draw_player(screen, sx, sy, a, p["color"], w, vest, helm)
+            draw_player(screen, sx, sy, a, p["color"], w, vest, helm, cloth, hat)
             if p["id"] != self.my_id:
                 ui.text(screen, p["name"], (sx, sy - 30), 15, center=True)
                 pygame.draw.rect(screen, (40, 0, 0), (sx - 16, sy - 21, 32, 4))
@@ -877,18 +899,33 @@ class GameScene:
         me = self.me
         W, H = SCREEN_W, SCREEN_H
         # полоски
-        ui.panel(screen, (12, H - 132, 270, 120))
-        bars = [("Здоровье", me["hp"], (210, 60, 60)), ("Сытость", me["food"], (220, 150, 60)),
-                ("Вода", me["water"], (70, 150, 230)), ("Выносливость", me["stam"], (230, 210, 80))]
-        for i, (name, v, col) in enumerate(bars):
-            y = H - 124 + i * 27
+        ui.panel(screen, (12, H - 160, 270, 148))
+        temp = me.get("temp", 36.6)
+        tcol = (90, 160, 255) if temp < 35.8 else ((255, 120, 60) if temp > 37.6 else (120, 220, 140))
+        bars = [("Здоровье", me["hp"] / 100, (210, 60, 60), "%d" % me["hp"]),
+                ("Сытость", me["food"] / 100, (220, 150, 60), "%d" % me["food"]),
+                ("Вода", me["water"] / 100, (70, 150, 230), "%d" % me["water"]),
+                ("Выносливость", me["stam"] / 100, (230, 210, 80), "%d" % me["stam"]),
+                ("Тело", (temp - 33) / 7, tcol, "%.1f°" % temp)]
+        for i, (name, v, col, label) in enumerate(bars):
+            y = H - 152 + i * 27
             ui.text(screen, name, (22, y), 15)
-            ui.bar(screen, (130, y + 3, 140, 14), v / 100, col)
-            ui.text(screen, str(int(v)), (200, y), 13, center=False)
-        if me["bleed"] and int(self.time * 3) % 2 == 0:
-            ui.text(screen, "КРОВОТЕЧЕНИЕ! (H - бинт)", (20, H - 160), 20, (255, 70, 70), bold=True)
-        elif me["food"] < 15 or me["water"] < 15:
-            ui.text(screen, "Голод / жажда!" if me["food"] < 15 else "Жажда!", (20, H - 160), 18, (255, 160, 70))
+            ui.bar(screen, (130, y + 3, 140, 14), v, col)
+            ui.text(screen, label, (200, y), 13, center=False)
+        warn = []
+        if me["bleed"]:
+            warn.append(("КРОВОТЕЧЕНИЕ! (H - бинт)", (255, 70, 70)))
+        if me.get("inf"):
+            warn.append(("ЗАРАЖЕНИЕ! Нужны антибиотики", (190, 255, 90)))
+        if temp < 35.5:
+            warn.append(("Вы замерзаете! Одежда, костёр или укрытие", (120, 180, 255)))
+        elif temp > 37.8:
+            warn.append(("Перегрев! Тень, лёгкая одежда, вода", (255, 140, 60)))
+        if me["food"] < 15 or me["water"] < 15:
+            warn.append(("Голод!" if me["food"] < 15 else "Жажда!", (255, 160, 70)))
+        if warn and int(self.time * 3) % 3:
+            for i, (t, c) in enumerate(warn[:3]):
+                ui.text(screen, t, (20, H - 190 - i * 24), 19, c, bold=True)
         # оружие
         ui.panel(screen, (W - 312, H - 132, 300, 120))
         g, mel = me["eq"].get("gun"), me["eq"].get("melee")
@@ -920,12 +957,22 @@ class GameScene:
         # время
         h = (self.tod * 24) % 24
         night = self._darkness() > 100
-        ui.panel(screen, (12, 12, 250, 70))
+        ui.panel(screen, (12, 12, 290, 92))
         ui.text(screen, "День %d   %02d:%02d %s" % (self.day, int(h), int((h % 1) * 60), "Ночь" if night else ""),
                 (22, 18), 20, (180, 190, 255) if night else (255, 240, 180), bold=True)
         where = self._area_name() if self.vbid is None else "%s, этаж %d" % (self._bname(self.vbid), self.vlv + 1)
         ui.text(screen, where, (22, 44), 15, (200, 200, 200))
-        ui.text(screen, "Убито зомби: %d" % me["kills"], (22, 62), 13, (200, 160, 160))
+        wname = {"clear": "ясно", "rain": "дождь", "storm": "буря"}.get(self.weather, "")
+        clim = self._climate()
+        if self.weather == "rain" and clim == "snow":
+            wname = "снегопад"
+        elif self.weather == "storm":
+            wname = {"snow": "метель", "desert": "песчаная буря"}.get(clim, "гроза")
+        amb = me.get("amb", 20)
+        ui.text(screen, "Воздух %+d°C, %s%s" % (amb, wname, "  |  у костра" if me.get("fire") else ""), (22, 63), 14,
+                (150, 200, 255) if amb < 5 else ((255, 170, 90) if amb > 30 else (200, 220, 200)))
+        ui.text(screen, "Убито зомби: %d" % me["kills"], (22, 82), 13, (200, 160, 160))
+        self._draw_waypoint(screen)
         # машина
         if me["car"] >= 0 and me["car"] in self.cars:
             c = self.cars[me["car"]]
@@ -978,46 +1025,263 @@ class GameScene:
             mx, my = X + (c["rx"] / TILE - x0) * k, Y + (c["ry"] / TILE - y0) * k
             if X <= mx <= X + S and Y <= my <= Y + S and not c["wreck"]:
                 pygame.draw.rect(screen, (230, 230, 230), (int(mx) - 2, int(my) - 1, 4, 3))
+        for dx, dy in self.drops:
+            mx, my = X + (dx / TILE - x0) * k, Y + (dy / TILE - y0) * k
+            self._icon_drop(screen, *self._clamp_marker(mx, my, X, Y, S, S), 6)
+        if self.waypoint:
+            mx, my = X + (self.waypoint[0] - x0) * k, Y + (self.waypoint[1] - y0) * k
+            self._icon_flag(screen, *self._clamp_marker(mx, my, X, Y, S, S), 0.8)
+        ui.text(screen, "N", (X + S // 2, Y + 3), 13, (255, 255, 255), center=True)
         ui.text(screen, "M - карта", (X + S // 2, Y + S + 10), 13, (200, 200, 200), center=True)
 
+    @staticmethod
+    def _clamp_marker(mx, my, X, Y, W, H):
+        return max(X + 6, min(X + W - 6, mx)), max(Y + 6, min(Y + H - 6, my))
+
+    # ---------- значки карты ----------
+    @staticmethod
+    def _icon_drop(s, x, y, r=8):
+        pygame.draw.circle(s, (250, 210, 60), (int(x), int(y) - r // 2), r, draw_top_left=True, draw_top_right=True)
+        pygame.draw.line(s, (250, 250, 250), (x - r, y - r // 2), (x, y + r), 1)
+        pygame.draw.line(s, (250, 250, 250), (x + r, y - r // 2), (x, y + r), 1)
+        pygame.draw.rect(s, (90, 110, 60), (x - 3, y + r - 3, 6, 6))
+
+    @staticmethod
+    def _icon_flag(s, x, y, k=1.0):
+        pygame.draw.line(s, (30, 30, 30), (x, y), (x, y - 22 * k), 3)
+        pygame.draw.polygon(s, (230, 40, 40), [(x, y - 22 * k), (x + 16 * k, y - 16 * k), (x, y - 10 * k)])
+        pygame.draw.circle(s, (255, 255, 255), (int(x), int(y)), 3)
+
+    @staticmethod
+    def _icon_camp(s, x, y, kind):
+        if kind == "trader":
+            pygame.draw.circle(s, (30, 30, 30), (int(x), int(y)), 11)
+            pygame.draw.circle(s, (240, 200, 60), (int(x), int(y)), 10)
+            ui.text(s, "$", (x, y - 1), 15, (60, 40, 0), bold=True, center=True, shadow=False)
+        elif kind == "bandits":
+            pygame.draw.circle(s, (30, 30, 30), (int(x), int(y)), 11)
+            pygame.draw.circle(s, (190, 40, 40), (int(x), int(y)), 10)
+            pygame.draw.line(s, (255, 255, 255), (x - 5, y - 5), (x + 5, y + 5), 3)
+            pygame.draw.line(s, (255, 255, 255), (x + 5, y - 5), (x - 5, y + 5), 3)
+        else:
+            pts = [(x + math.cos(a) * (11 if i % 2 == 0 else 5), y + math.sin(a) * (11 if i % 2 == 0 else 5))
+                   for i, a in enumerate([-math.pi / 2 + i * math.pi / 5 for i in range(10)])]
+            pygame.draw.polygon(s, (30, 30, 30), [(px + 1, py + 1) for px, py in pts])
+            pygame.draw.polygon(s, (110, 170, 80), pts)
+
+    def _map_rect(self):
+        return pygame.Rect(30, 50, 930, 640)
+
+    def _map_view(self):
+        r = self._map_rect()
+        z = MAP_ZOOMS[self.map_zoom]
+        if self.map_center is None:
+            cx, cy = self.vx / TILE, self.vy / TILE
+        else:
+            cx, cy = self.map_center
+        return r, z, cx - r.w / z / 2, cy - r.h / z / 2
+
+    def _map_event(self, e):
+        r, z, x0, y0 = self._map_view()
+        if e.type == pygame.MOUSEWHEEL:
+            mx, my = pygame.mouse.get_pos()
+            if r.collidepoint((mx, my)):
+                wx, wy = x0 + (mx - r.x) / z, y0 + (my - r.y) / z
+                self.map_zoom = max(0, min(len(MAP_ZOOMS) - 1, self.map_zoom + (1 if e.y > 0 else -1)))
+                nz = MAP_ZOOMS[self.map_zoom]
+                self.map_center = (wx - (mx - r.x) / nz + r.w / nz / 2, wy - (my - r.y) / nz + r.h / nz / 2)
+            return True
+        if e.type == pygame.MOUSEBUTTONDOWN and r.collidepoint(e.pos):
+            if e.button == 1:
+                self.map_drag = True
+                if self.map_center is None:
+                    self.map_center = (self.vx / TILE, self.vy / TILE)
+            elif e.button == 3:
+                wx, wy = x0 + (e.pos[0] - r.x) / z, y0 + (e.pos[1] - r.y) / z
+                if self.waypoint and math.hypot(self.waypoint[0] - wx, self.waypoint[1] - wy) * z < 14:
+                    self.waypoint = None
+                else:
+                    self.waypoint = (wx, wy)
+            return True
+        if e.type == pygame.MOUSEBUTTONUP and e.button == 1:
+            self.map_drag = False
+            return True
+        if e.type == pygame.MOUSEMOTION and self.map_drag:
+            cx, cy = self.map_center
+            self.map_center = (cx - e.rel[0] / z, cy - e.rel[1] / z)
+            return True
+        if e.type == pygame.KEYDOWN and e.key in (pygame.K_c, pygame.K_SPACE):
+            self.map_center = None
+            return True
+        if e.type == pygame.KEYDOWN and e.key == pygame.K_DELETE:
+            self.waypoint = None
+            return True
+        return False
+
     def _draw_map(self, screen):
-        S, span = 600, 320
-        cx, cy = int(self.vx // TILE), int(self.vy // TILE)
-        x0, y0 = cx - span // 2, cy - span // 2
-        img = pygame.transform.scale(self.r.area_map(x0, y0, span, span), (S, S))
-        X, Y = (SCREEN_W - S) // 2, (SCREEN_H - S) // 2
-        ui.panel(screen, (X - 10, Y - 10, S + 20, S + 20), alpha=245)
-        screen.blit(img, (X, Y))
-        k = S / span
-        for ccy in range(y0 >> 5, ((y0 + span) >> 5) + 1):
-            for ccx in range(x0 >> 5, ((x0 + span) >> 5) + 1):
+        r, z, x0, y0 = self._map_view()
+        ov = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+        ov.fill((0, 0, 0, 170))
+        screen.blit(ov, (0, 0))
+        ui.panel(screen, (r.x - 8, r.y - 38, r.w + 16 + 290, r.h + 46), alpha=250)
+        tw, th = int(r.w / z) + 2, int(r.h / z) + 2
+        tx0, ty0 = int(math.floor(x0)), int(math.floor(y0))
+        img = self.r.area_map(tx0, ty0, tw, th)
+        img = pygame.transform.scale(img, (int(tw * z), int(th * z)))
+        screen.set_clip(r)
+        screen.blit(img, (r.x - (x0 - tx0) * z, r.y - (y0 - ty0) * z))
+
+        def w2m(tx, ty):
+            return r.x + (tx - x0) * z, r.y + (ty - y0) * z
+
+        labels = []
+        for ccy in range(ty0 >> 5, ((ty0 + th) >> 5) + 1):
+            for ccx in range(tx0 >> 5, ((tx0 + tw) >> 5) + 1):
                 c = self.world.chunks.get((ccx, ccy))
                 if not c:
                     continue
-                labels = []
-                if c.label:
-                    labels.append((c.label, ccx * CS + 16, ccy * CS + 16,
-                                   (255, 210, 90) if c.biome == "trader" else (255, 110, 90)))
-                for b in c.buildings:
-                    lab = KIND_LABEL.get(b.kind)
-                    if lab and b.kind not in ("barracks", "barn"):
-                        labels.append((lab, b.x + b.w / 2, b.y + b.h / 2, (235, 235, 235)))
-                for lab, tx, ty, col in labels:
-                    mx, my = X + (tx - x0) * k, Y + (ty - y0) * k
-                    if X < mx < X + S and Y < my < Y + S:
-                        ui.text(screen, lab, (mx, my), 11, col, center=True)
+                mx, my = w2m(ccx * CS + 16, ccy * CS + 16)
+                if c.biome in ("trader", "bandits", "military"):
+                    self._icon_camp(screen, mx, my, c.biome)
+                    if z >= 1.5:
+                        labels.append((c.label, mx, my + 16, (255, 230, 150)))
+                if z >= 2.5:
+                    for b in c.buildings:
+                        lab = KIND_LABEL.get(b.kind)
+                        if lab and b.kind not in ("barracks", "barn"):
+                            labels.append((lab, *w2m(b.x + b.w / 2, b.y + b.h / 2), (240, 240, 240)))
+        for lab, mx, my, col in labels:
+            ui.text(screen, lab, (mx, my), 12 if z < 4 else 14, col, center=True)
+        for dx, dy in self.drops:
+            self._icon_drop(screen, *w2m(dx / TILE, dy / TILE), 10)
+        if self.waypoint:
+            mx, my = w2m(*self.waypoint)
+            self._icon_flag(screen, mx, my, 1.2)
         for p in self.players.values():
             if not p["alive"] or (p["id"] != self.my_id and not self.settings.get("map_marks", True)):
                 continue
-            x, y = (self.px, self.py) if p["id"] == self.my_id else (p["rx"], p["ry"])
-            mx, my = X + (x / TILE - x0) * k, Y + (y / TILE - y0) * k
-            if X < mx < X + S and Y < my < Y + S:
-                pygame.draw.circle(screen, (255, 255, 255), (int(mx), int(my)), 6)
-                pygame.draw.circle(screen, p["color"], (int(mx), int(my)), 5)
-                ui.text(screen, p["name"], (mx, my - 14), 13, center=True)
-        ui.text(screen, "Карта исследованной местности (M - закрыть)", (SCREEN_W // 2, Y - 2), 18, center=True,
-                bold=True)
-        ui.text(screen, "Координаты: %d, %d" % (cx, cy), (X + 8, Y + S - 22), 14, (200, 200, 200))
+            me = p["id"] == self.my_id
+            x, y = (self.px, self.py) if me else (p["rx"], p["ry"])
+            mx, my = w2m(x / TILE, y / TILE)
+            if me:
+                a = self.aim
+                pts = [(mx + math.cos(a) * 12, my + math.sin(a) * 12), (mx + math.cos(a + 2.5) * 8, my + math.sin(a + 2.5) * 8),
+                       (mx + math.cos(a - 2.5) * 8, my + math.sin(a - 2.5) * 8)]
+                pygame.draw.polygon(screen, (255, 255, 255), pts)
+                pygame.draw.polygon(screen, p["color"], pts, 2)
+            else:
+                pygame.draw.circle(screen, (255, 255, 255), (int(mx), int(my)), 7)
+                pygame.draw.circle(screen, p["color"], (int(mx), int(my)), 6)
+            ui.text(screen, p["name"], (mx, my - 18), 13, center=True)
+        screen.set_clip(None)
+        pygame.draw.rect(screen, (0, 0, 0), r, 2)
+        ui.text(screen, "Карта мира", (r.x, r.y - 32), 22, (255, 220, 150), bold=True)
+        ui.text(screen, "Колесо - масштаб x%g   ЛКМ - двигать   ПКМ - метка   C - к себе   M - закрыть" % z,
+                (r.right, r.y - 28), 14, (200, 200, 200), right=True)
+        # легенда
+        lx, ly = r.right + 22, r.y + 4
+        ui.text(screen, "Легенда", (lx, ly), 19, (255, 220, 150), bold=True)
+        ly += 32
+        items = [((62, 110, 52), "Луга и леса"), ((30, 75, 35), "Деревья"), ((214, 190, 128), "Пустыня"),
+                 ((226, 232, 240), "Снега"), ((40, 90, 160), "Вода / реки"), ((170, 210, 235), "Лёд"),
+                 ((58, 58, 62), "Дороги"), ((130, 105, 70), "Грунтовки"), ((130, 120, 55), "Поля"),
+                 ((150, 70, 50), "Здания"), ((18, 20, 24), "Не исследовано")]
+        for col, name in items:
+            pygame.draw.rect(screen, col, (lx, ly + 2, 18, 14))
+            pygame.draw.rect(screen, (0, 0, 0), (lx, ly + 2, 18, 14), 1)
+            ui.text(screen, name, (lx + 28, ly), 15)
+            ly += 23
+        ly += 8
+        for kind, name in (("trader", "Торговцы"), ("bandits", "Бандиты"), ("military", "Военная база")):
+            self._icon_camp(screen, lx + 9, ly + 9, kind)
+            ui.text(screen, name, (lx + 28, ly), 15)
+            ly += 28
+        self._icon_drop(screen, lx + 9, ly + 6, 9)
+        ui.text(screen, "Сброс груза", (lx + 28, ly), 15)
+        ly += 28
+        self._icon_flag(screen, lx + 6, ly + 18, 0.8)
+        ui.text(screen, "Ваша метка", (lx + 28, ly), 15)
+        ly += 34
+        cx, cy = int(self.vx // TILE), int(self.vy // TILE)
+        ui.text(screen, "Вы: %d, %d" % (cx, cy), (lx, ly), 15, (200, 200, 200))
+        ly += 22
+        ui.text(screen, "Сейчас: %s" % self._area_name(), (lx, ly), 15, (200, 200, 200))
+        if self.waypoint:
+            ly += 22
+            d = math.hypot(self.waypoint[0] - self.vx / TILE, self.waypoint[1] - self.vy / TILE)
+            ui.text(screen, "До метки: %d м" % d, (lx, ly), 15, (255, 140, 120))
+
+    def _draw_waypoint(self, screen):
+        if not self.waypoint or not self.me["alive"]:
+            return
+        wx, wy = self.waypoint[0] * TILE, self.waypoint[1] * TILE
+        d = math.hypot(wx - self.px, wy - self.py) / TILE
+        if d < 3:
+            self.waypoint = None
+            self.add_feed("Вы на месте метки", (140, 230, 120))
+            return
+        sx, sy = self.w2s(wx, wy)
+        if 0 <= sx <= SCREEN_W and 0 <= sy <= SCREEN_H:
+            self._icon_flag(screen, sx, sy, 1.2)
+            ui.text(screen, "%d м" % d, (sx, sy + 12), 14, (255, 200, 190), center=True)
+            return
+        a = math.atan2(sy - SCREEN_H / 2, sx - SCREEN_W / 2)
+        ex = SCREEN_W / 2 + math.cos(a) * (SCREEN_W / 2 - 50)
+        ey = SCREEN_H / 2 + math.sin(a) * (SCREEN_H / 2 - 50)
+        ex, ey = max(40, min(SCREEN_W - 40, ex)), max(120, min(SCREEN_H - 180, ey))
+        pts = [(ex + math.cos(a) * 18, ey + math.sin(a) * 18), (ex + math.cos(a + 2.4) * 12, ey + math.sin(a + 2.4) * 12),
+               (ex + math.cos(a - 2.4) * 12, ey + math.sin(a - 2.4) * 12)]
+        pygame.draw.polygon(screen, (230, 40, 40), pts)
+        pygame.draw.polygon(screen, (255, 255, 255), pts, 2)
+        ui.text(screen, "%d м" % d, (ex - math.cos(a) * 22, ey - math.sin(a) * 22), 14, (255, 220, 210), center=True)
+
+    def _climate(self):
+        c = self.world.chunks.get((int(self.vx // TILE) >> 5, int(self.vy // TILE) >> 5))
+        return c.climate if c else "temperate"
+
+    def _draw_weather(self, screen, dt):
+        """Дождь / снегопад / песчаная буря - только на улице."""
+        if self.vlv > 0 or self.vbid is not None:
+            self.wparts = []
+            return
+        clim = self._climate()
+        kind = None
+        n = 0
+        if clim == "snow":
+            kind, n = "snow", (6 if self.weather != "clear" else 2)
+        elif self.weather in ("rain", "storm"):
+            kind = "sand" if clim == "desert" and self.weather == "storm" else ("rain" if clim != "desert" else None)
+            n = 9 if self.weather == "storm" else 5
+        if kind == "sand" or (kind == "snow" and self.weather == "storm"):
+            ov = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+            ov.fill((205, 160, 90, 125) if kind == "sand" else (230, 235, 245, 90))
+            screen.blit(ov, (0, 0))
+        elif kind == "rain":
+            ov = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+            ov.fill((20, 30, 50, 45))
+            screen.blit(ov, (0, 0))
+        for _ in range(n if kind else 0):
+            if kind == "rain":
+                self.wparts.append([random.uniform(0, SCREEN_W + 200), -10, -120, 900, kind])
+            elif kind == "snow":
+                self.wparts.append([random.uniform(0, SCREEN_W), -5, random.uniform(-30, 30), random.uniform(50, 110),
+                                    kind])
+            else:
+                self.wparts.append([-10, random.uniform(0, SCREEN_H), random.uniform(500, 800), random.uniform(-40, 40),
+                                    kind])
+        alive = []
+        for p in self.wparts:
+            p[0] += p[2] * dt
+            p[1] += p[3] * dt
+            if -20 <= p[0] <= SCREEN_W + 220 and -20 <= p[1] <= SCREEN_H + 20:
+                alive.append(p)
+                if p[4] == "rain":
+                    pygame.draw.line(screen, (170, 190, 230), (p[0], p[1]), (p[0] - 3, p[1] + 14), 1)
+                elif p[4] == "snow":
+                    pygame.draw.circle(screen, (255, 255, 255), (int(p[0]), int(p[1])), 2)
+                else:
+                    pygame.draw.line(screen, (220, 180, 110), (p[0], p[1]), (p[0] - 10, p[1]), 2)
+        self.wparts = alive[-700:]
 
     # ---------- инвентарь ----------
     def _slot(self, screen, rect, it, label=None):
@@ -1048,7 +1312,7 @@ class GameScene:
         ui.panel(screen, (X, Y, 560, 590), alpha=235)
         ui.text(screen, "Инвентарь  %d/%d" % (len(me["inv"]), me["slots"]), (X + 16, Y + 10), 22, bold=True)
         for i, (slot, label) in enumerate(EQ_SLOTS):
-            r = pygame.Rect(X + 16 + i * (SLOT + 46), Y + 52, SLOT + 30, SLOT)
+            r = pygame.Rect(X + 16 + i * 76, Y + 52, 70, SLOT)
             it = me["eq"].get(slot)
             ui.text(screen, label, (r.centerx, Y + 44), 12, (170, 170, 180), center=True)
             self._slot(screen, r, it, "пусто")

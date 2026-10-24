@@ -14,21 +14,29 @@ MAX_LV = 4       # максимум этажей
 (FRIDGE, CABINET, WARDROBE, DESK, SHELF, MEDCAB, LOCKER, CRATE, MILCRATE, TOOLBOX,
  BED, TABLE, SOFA, WORKBENCH, COUNTER, PUMP, CAMPFIRE) = range(20, 37)
 (ROCK, BUSH, BUSH_EMPTY, WOODWALL, STONEWALL, WOODDOOR, PATH, CHEST) = range(37, 45)
+(SAND, SNOW, CACTUS, PINE, DEADBUSH, BRIDGE, ICE) = range(45, 52)
+
+GROUNDS = (GRASS, SAND, SNOW)
+TREES = (TREE, PINE, CACTUS)
+GROUND_OF = {"temperate": GRASS, "desert": SAND, "snow": SNOW}
+# температура воздуха: (днём, ночью)
+CLIMATE_T = {"temperate": (19, 8), "desert": (41, 9), "snow": (-7, -22)}
 
 SOLID = bytearray(64)
-for _t in (WALL, WINDOW, TREE, WATER, FENCE, VOID, ROCK, BUSH, BUSH_EMPTY, WOODWALL, STONEWALL, CHEST) + \
-        tuple(range(20, 37)):
+for _t in (WALL, WINDOW, TREE, WATER, FENCE, VOID, ROCK, BUSH, BUSH_EMPTY, WOODWALL, STONEWALL, CHEST, CACTUS,
+           PINE, DEADBUSH) + tuple(range(20, 37)):
     SOLID[_t] = 1
 ZSOLID = bytearray(SOLID)  # для зомби деревянная дверь тоже стена
 ZSOLID[WOODDOOR] = 1
 BULLET = bytearray(64)
-for _t in (WALL, TREE, VOID, ROCK, WOODWALL, STONEWALL, WOODDOOR):
+for _t in (WALL, TREE, VOID, ROCK, WOODWALL, STONEWALL, WOODDOOR, PINE, CACTUS):
     BULLET[_t] = 1
 SIGHT = bytearray(64)
 for _t in (WALL, VOID, WOODWALL, STONEWALL, WOODDOOR):
     SIGHT[_t] = 1
 # где можно строить
-PLACEABLE = (GRASS, DIRT, SIDEWALK, CONCRETE, WOOD, TILEF, FIELD, DIRTROAD, PATH, ROAD, ROADV, ROADH)
+PLACEABLE = (GRASS, DIRT, SIDEWALK, CONCRETE, WOOD, TILEF, FIELD, DIRTROAD, PATH, ROAD, ROADV, ROADH, SAND, SNOW,
+             BRIDGE, ICE)
 
 CONTAINER = {FRIDGE: "fridge", CABINET: "cabinet", WARDROBE: "wardrobe", DESK: "desk", SHELF: "shelf",
              MEDCAB: "medcab", LOCKER: "locker", CRATE: "crate", MILCRATE: "milcrate", TOOLBOX: "toolbox",
@@ -38,6 +46,23 @@ TILE_NAMES = {FRIDGE: "Холодильник", CABINET: "Шкафчик", WARDR
               MILCRATE: "Военный ящик", TOOLBOX: "Ящик с инструментами", WORKBENCH: "Верстак",
               PUMP: "Бензоколонка", UP: "Лестница вверх", DOWN: "Лестница вниз", CAMPFIRE: "Костёр",
               CHEST: "Сундук", BUSH: "Ягодный куст", BED: "Кровать"}
+BIOME_NAMES = {"downtown": "Центр города", "city": "Город", "suburb": "Окраина города", "farm": "Фермы",
+               "forest": "Лес", "park": "Озеро", "wild": "Равнина", "military": "Военная база",
+               "trader": "Лагерь торговцев", "bandits": "Лагерь бандитов", "village": "Деревня", "rocky": "Скалы",
+               "swamp": "Болото"}
+CLIMATE_NAMES = {("wild", "desert"): "Пустыня", ("park", "desert"): "Оазис", ("forest", "snow"): "Тайга",
+                 ("wild", "snow"): "Тундра", ("farm", "snow"): "Заснеженные фермы",
+                 ("park", "snow"): "Замёрзшее озеро", ("rocky", "desert"): "Каньон", ("rocky", "snow"): "Ледяные скалы",
+                 ("village", "snow"): "Северная деревня", ("village", "desert"): "Пустынное поселение"}
+
+
+def area_name(biome, climate):
+    n = CLIMATE_NAMES.get((biome, climate)) or BIOME_NAMES.get(biome, "Улица")
+    if climate == "desert" and (biome, climate) not in CLIMATE_NAMES:
+        n += " (пустыня)"
+    elif climate == "snow" and (biome, climate) not in CLIMATE_NAMES:
+        n += " (снега)"
+    return n
 
 # Строительство: ключ, название, тайл, стоимость
 BUILDS = [
@@ -52,7 +77,8 @@ BUILDS = [
 ]
 BUILD_D = {k: (name, t, cost) for k, name, t, cost in BUILDS}
 # добыча: тайл -> (предмет, прочность, количество, тайл после)
-RESOURCES = {TREE: ("wood", 6, (2, 4), GRASS), ROCK: ("stone", 6, (2, 3), GRASS)}
+RESOURCES = {TREE: ("wood", 6, (2, 4), None), PINE: ("wood", 7, (3, 4), None), CACTUS: ("wood", 3, (1, 1), None),
+             ROCK: ("stone", 6, (2, 3), None)}
 
 KIND_LABEL = {"store": "МАГАЗИН", "police": "ПОЛИЦИЯ", "hospital": "БОЛЬНИЦА", "garage": "ГАРАЖ",
               "warehouse": "СКЛАД", "gas": "АЗС", "barracks": "КАЗАРМА", "barn": "АМБАР"}
@@ -103,6 +129,7 @@ ZONES = {
              ("warehouse", 6), ("hospital", 4)],
     "suburb": [("house", 60), ("garage", 10), ("warehouse", 7), ("store", 10), ("gas", 7), ("police", 2)],
     "farm": [("farmhouse", 3), ("barn", 2)],
+    "village": [("house", 6), ("farmhouse", 3), ("gas", 1), ("store", 1), ("garage", 1), ("barn", 1)],
 }
 HOUSE_ROOFS = [(150, 70, 50), (120, 60, 45), (95, 95, 110), (140, 100, 60), (110, 50, 50)]
 ROOF = {"apartment": (95, 95, 105), "store": (70, 110, 140), "police": (40, 60, 120), "hospital": (205, 205, 210),
@@ -110,6 +137,7 @@ ROOF = {"apartment": (95, 95, 105), "store": (70, 110, 140), "police": (40, 60, 
         "barn": (150, 50, 40), "shack": (100, 110, 80)}
 GABLE = ("house", "farmhouse", "cabin", "barn", "shack")
 URBAN = ("downtown", "city", "suburb")
+SETTLED = URBAN + ("village", "trader", "bandits", "military", "farm")
 
 
 def _pick(rng, table):
@@ -153,9 +181,11 @@ class Building:
 
 class Chunk:
     __slots__ = ("cx", "cy", "levels", "bmap", "buildings", "car_spawns", "zombie_spawns", "npc_spawns",
-                 "biome", "label")
+                 "biome", "label", "climate", "ground")
 
     def __init__(self, cx, cy):
+        self.climate = "temperate"
+        self.ground = GRASS
         self.cx, self.cy = cx, cy
         self.levels = [bytearray(CS * CS)]
         self.bmap = array("h", [-1]) * (CS * CS)
@@ -219,35 +249,88 @@ class World:
             b = "wild"          # старт за городом
         elif k == (1, 1):
             b = "trader"
+        elif k == (-1, 1):
+            b = "village"       # деревня недалеко от старта
         elif max(abs(cx), abs(cy)) <= 1:
-            b = ("farm", "forest", "wild", "farm")[int(_hash(s, cx, cy, 6) * 4)]
+            b = ("forest", "wild", "forest", "farm")[int(_hash(s, cx, cy, 6) * 4)]
         else:
-            u = 0.6 * _noise(s, cx / 6.0, cy / 6.0, 1) + 0.4 * _noise(s, cx / 2.5, cy / 2.5, 2)
+            # города - редкие небольшие островки посреди природы
+            u = self.city_value(cx, cy)
             sp = _hash(s, cx, cy, 3)
-            if u > 0.66:
+            if u > 0.83:
                 b = "downtown"
-            elif u > 0.57:
+            elif u > 0.78:
                 b = "city"
-            elif u > 0.48:
-                b = "bandits" if sp < 0.04 else ("trader" if sp < 0.08 else "suburb")
+            elif u > 0.72:
+                b = "suburb"
+            elif sp < 0.008:
+                b = "military"
+            elif sp < 0.026:
+                b = "bandits"
+            elif sp < 0.045:
+                b = "trader"
+            elif sp < 0.085:
+                b = "village"
             else:
                 f = _noise(s, cx / 4.0, cy / 4.0, 4)
-                if sp < 0.02:
-                    b = "military"
-                elif sp < 0.06:
-                    b = "bandits"
-                elif sp < 0.095:
-                    b = "trader"
-                elif f > 0.55:
+                r = _noise(s, cx / 3.5, cy / 3.5, 5)
+                if f > 0.55:
                     b = "forest"
+                elif r < 0.27:
+                    b = "rocky"
+                elif r > 0.73:
+                    b = "swamp"
+                elif u > 0.62 and _hash(s, cx, cy, 5) < 0.5:
+                    b = "farm"
+                elif _hash(s, cx, cy, 7) < 0.06:
+                    b = "park"
                 else:
-                    r = _hash(s, cx, cy, 5)
-                    b = "farm" if r < 0.45 else ("park" if r < 0.6 else "wild")
+                    b = "wild"
         self._biomes[k] = b
         return b
 
+    def city_value(self, cx, cy):
+        s = self.seed
+        return 0.7 * _noise(s, cx / 5.0, cy / 5.0, 21) + 0.3 * _noise(s, cx / 2.0, cy / 2.0, 22)
+
     def urban(self, cx, cy):
         return self.biome(cx, cy) in URBAN
+
+    def settled(self, cx, cy):
+        return self.biome(cx, cy) in SETTLED
+
+    def road_v(self, cx, cy):
+        """Дорога по левому краю чанка: 'a' - асфальт, 'd' - грунтовка, None - нет."""
+        if self.urban(cx - 1, cy) or self.urban(cx, cy) or cx % 6 == 0:
+            return "a"
+        if self.settled(cx - 1, cy) or self.settled(cx, cy):
+            return "d"
+        return None
+
+    def road_h(self, cx, cy):
+        if self.urban(cx, cy - 1) or self.urban(cx, cy) or cy % 6 == 0:
+            return "a"
+        if self.settled(cx, cy - 1) or self.settled(cx, cy):
+            return "d"
+        return None
+
+    def climate(self, cx, cy):
+        """Климат чанка: temperate / desert / snow - большие плавные зоны."""
+        k = (cx, cy, "c")
+        c = self._biomes.get(k)
+        if c:
+            return c
+        if max(abs(cx), abs(cy)) <= 2:
+            c = "temperate"
+        else:
+            s = self.seed
+            v = 0.75 * _noise(s, cx / 6.0, cy / 6.0, 11) + 0.25 * _noise(s, cx / 3.0, cy / 3.0, 12)
+            c = "snow" if v < 0.37 else ("desert" if v > 0.63 else "temperate")
+        self._biomes[k] = c
+        return c
+
+    def ground(self, tx, ty):
+        return GROUND_OF[self.climate(tx >> 5, ty >> 5)]
 
     # ---------------- доступ ----------------
     def chunk(self, cx, cy):
@@ -294,7 +377,8 @@ class World:
             c = self.chunk(ccx, ccy)
             L = c.levels[0]
             cands = [i for i in range(CS * CS) if L[i] == SIDEWALK] or \
-                    [i for i in range(CS * CS) if L[i] in (ROAD, DIRTROAD)]
+                    [i for i in range(CS * CS) if L[i] in (ROAD, DIRTROAD)] or \
+                    [i for i in range(CS * CS) if L[i] in GROUNDS and c.bmap[i] < 0]
             if not cands:
                 continue
             i = rng.choice(cands)
@@ -391,24 +475,33 @@ class World:
         rng = random.Random("%d:%d:%d" % (self.seed, cx, cy))
         ox, oy = cx * CS, cy * CS
         bio = self.biome(cx, cy)
-        c.biome = bio
+        clim = self.climate(cx, cy)
+        if clim == "desert" and bio in ("farm", "forest", "swamp"):
+            bio = "wild"
+        elif clim == "snow" and bio == "swamp":
+            bio = "wild"
+        c.biome, c.climate = bio, clim
+        G = c.ground = GROUND_OF[clim]
         c.label = BIOME_LABEL.get(bio, "")
         L = c.levels[0]
-        L[:] = bytes([GRASS]) * (CS * CS)
-        # дороги: вертикальная слева, горизонтальная сверху
-        left = self.urban(cx - 1, cy) or self.urban(cx, cy)
-        top = self.urban(cx, cy - 1) or self.urban(cx, cy)
-        cross = left or top or self.urban(cx - 1, cy - 1)
-        for ly in range(CS):
-            for lx in range(3):
-                if ly < 3:
-                    t = ROAD if cross else DIRTROAD
-                else:
-                    t = (ROADV if lx == 1 else ROAD) if left else DIRTROAD
-                L[ly * CS + lx] = t
-        for ly in range(3):
-            for lx in range(3, CS):
-                L[ly * CS + lx] = (ROADH if ly == 1 else ROAD) if top else DIRTROAD
+        L[:] = bytes([G]) * (CS * CS)
+        # дороги только у поселений и редкие трассы (каждые 6 чанков), а не сетка везде
+        rv, rh = self.road_v(cx, cy), self.road_h(cx, cy)
+        corner = [r for r in (rv, rh, self.road_v(cx, cy - 1), self.road_h(cx - 1, cy)) if r]
+        left, top = rv is not None, rh is not None
+        if corner:
+            t = ROAD if "a" in corner else DIRTROAD
+            for ly in range(3):
+                for lx in range(3):
+                    L[ly * CS + lx] = t
+        if rv:
+            for ly in range(3, CS):
+                for lx in range(3):
+                    L[ly * CS + lx] = (ROADV if lx == 1 else ROAD) if rv == "a" else DIRTROAD
+        if rh:
+            for ly in range(3):
+                for lx in range(3, CS):
+                    L[ly * CS + lx] = (ROADH if ly == 1 else ROAD) if rh == "a" else DIRTROAD
         if bio in URBAN:
             for i in range(3, CS):
                 for lx, ly in ((3, i), (31, i), (i, 3), (i, 31)):
@@ -424,6 +517,17 @@ class World:
             self._camp(rng, block, bio)
         elif bio == "farm":
             self._farm(rng, block)
+        elif bio == "village":
+            self._fill_lots(rng, block, "village", *block, 14)
+        elif bio == "swamp":
+            s = self.seed
+            for ly in range(CS):
+                for lx in range(CS):
+                    i = ly * CS + lx
+                    if L[i] == G and _noise(s, (ox + lx) / 4.0, (oy + ly) / 4.0, 31) > 0.62:
+                        L[i] = WATER
+            if rng.random() < 0.3:
+                self._lone(rng, block, "cabin")
         elif bio == "forest":
             if rng.random() < 0.45:
                 self._lone(rng, block, "cabin")
@@ -432,33 +536,60 @@ class World:
         else:
             r = rng.random()
             if r < 0.3:
-                self._lone(rng, block, rng.choice(("house", "gas", "farmhouse")))
+                self._lone(rng, block, rng.choice(("house", "gas", "farmhouse") if clim != "desert"
+                                                  else ("gas", "house", "shack")))
             elif r < 0.5:
                 self._pond(rng, block, 0.03)
+        # реки (зимой замёрзшие), на дорогах - мосты
+        if bio not in ("downtown", "city", "military", "trader", "bandits") and clim != "desert":
+            s = self.seed
+            for ly in range(CS):
+                for lx in range(CS):
+                    i = ly * CS + lx
+                    if c.bmap[i] >= 0:
+                        continue
+                    if abs(_noise(s, (ox + lx) / 48.0, (oy + ly) / 48.0, 13) - 0.5) < 0.013:
+                        t = L[i]
+                        if t in (ROAD, ROADV, ROADH, DIRTROAD, SIDEWALK):
+                            L[i] = BRIDGE
+                        elif t in (G, FIELD, PATH, DIRT, TREE):
+                            L[i] = ICE if clim == "snow" else WATER
         tree_p = {"forest": 0.33, "wild": 0.06, "farm": 0.03, "suburb": 0.03, "city": 0.012, "downtown": 0.0,
-                  "trader": 0.05, "bandits": 0.06, "military": 0.0, "park": 0.0}[bio]
-        rock_p = {"forest": 0.015, "wild": 0.025, "farm": 0.006, "park": 0.01, "bandits": 0.01}.get(bio, 0.0)
+                  "trader": 0.05, "bandits": 0.06, "military": 0.0, "park": 0.0, "village": 0.04, "rocky": 0.03,
+                  "swamp": 0.12}[bio]
+        rock_p = {"forest": 0.015, "wild": 0.025, "farm": 0.006, "park": 0.01, "bandits": 0.01, "rocky": 0.16,
+                  "swamp": 0.005}.get(bio, 0.0)
         bush_p = {"forest": 0.03, "wild": 0.03, "farm": 0.02, "park": 0.03, "suburb": 0.008, "trader": 0.02,
-                  "bandits": 0.01}.get(bio, 0.0)
+                  "bandits": 0.01, "village": 0.02, "rocky": 0.01, "swamp": 0.06}.get(bio, 0.0)
+        tree_t, bush_t = TREE, BUSH
+        if clim == "desert":
+            tree_t, bush_t = CACTUS, DEADBUSH
+            tree_p, rock_p, bush_p = tree_p * 0.5 + 0.01, rock_p * 1.5, bush_p * 1.2
+        elif clim == "snow":
+            tree_t = PINE
+            bush_p *= 0.5
+            if bio == "wild":
+                tree_p = 0.1
         if tree_p or rock_p or bush_p:
-            for ly in range(4, CS - 1):
-                for lx in range(4, CS - 1):
-                    if L[ly * CS + lx] != GRASS:
+            lo = 4 if bio in URBAN else 1
+            for ly in range(lo, CS - 1):
+                for lx in range(lo, CS - 1):
+                    if L[ly * CS + lx] != G:
                         continue
                     r = rng.random()
                     if r < tree_p + rock_p + bush_p and self._clear_around(ox + lx, oy + ly):
-                        L[ly * CS + lx] = TREE if r < tree_p else (ROCK if r < tree_p + rock_p else BUSH)
+                        L[ly * CS + lx] = tree_t if r < tree_p else (ROCK if r < tree_p + rock_p else bush_t)
         if (cx, cy) == (0, 0):
             # стартовая стоянка у дороги: костёр и пара кустов
             for (lx, ly, t) in ((8, 8, CAMPFIRE), (11, 6, BUSH), (6, 11, BUSH), (13, 10, ROCK)):
                 if L[ly * CS + lx] in (GRASS, TREE) and c.bmap[ly * CS + lx] < 0:
                     L[ly * CS + lx] = t
         # машины на дорогах
-        if rng.random() < (0.55 if left else 0.15):
+        if left and rng.random() < (0.55 if rv == "a" else 0.2):
             ty = oy + rng.randint(6, 28)
             lane = rng.choice((0, 2))
             self._try_car(ox + lane, ty, math.pi / 2 if lane == 0 else -math.pi / 2)
-        if rng.random() < (0.55 if top else 0.15):
+        if top and rng.random() < (0.55 if rh == "a" else 0.2):
             tx = ox + rng.randint(6, 28)
             lane = rng.choice((0, 2))
             self._try_car(tx, oy + lane, math.pi if lane == 0 else 0.0)
@@ -488,7 +619,7 @@ class World:
     def _clear_around(self, tx, ty):
         for oy in (-1, 0, 1):
             for ox in (-1, 0, 1):
-                if self._get(0, tx + ox, ty + oy) not in (GRASS, TREE, SIDEWALK, FIELD) or \
+                if self._get(0, tx + ox, ty + oy) not in (GRASS, SAND, SNOW, TREE, PINE, CACTUS, SIDEWALK, FIELD) or \
                         self._bget(tx + ox, ty + oy) >= 0:
                     return False
         return True
@@ -499,10 +630,16 @@ class World:
         rx, ry = rng.uniform(3, 7), rng.uniform(3, 6)
         for ty in range(by, by + bh):
             for tx in range(bx, bx + bw):
-                if ((tx + 0.5 - cx) / rx) ** 2 + ((ty + 0.5 - cy) / ry) ** 2 < 1:
-                    self._set(0, tx, ty, WATER)
+                d = ((tx + 0.5 - cx) / rx) ** 2 + ((ty + 0.5 - cy) / ry) ** 2
+                if d < 1:
+                    self._set(0, tx, ty, ICE if self._g.climate == "snow" else WATER)
+                elif self._g.climate == "desert" and d < 1.6:
+                    if rng.random() < 0.35:
+                        self._set(0, tx, ty, TREE)   # пальмы оазиса
+                    else:
+                        self._set(0, tx, ty, GRASS)
                 elif rng.random() < trees:
-                    self._set(0, tx, ty, TREE)
+                    self._set(0, tx, ty, PINE if self._g.climate == "snow" else TREE)
 
     def _lone(self, rng, b, kind):
         bx, by, bw, bh = b
@@ -757,7 +894,7 @@ class World:
             ox_, oy_ = (0, -1) if dy == y else (0, 1) if dy == y + h - 1 else (-1, 0) if dx == x else (1, 0)
             for k in range(1, 14):
                 px, py = dx + ox_ * k, dy + oy_ * k
-                if get(0, px, py) not in (GRASS, FIELD, TREE) or self._bget(px, py) >= 0:
+                if get(0, px, py) not in (GRASS, SAND, SNOW, FIELD, TREE) or self._bget(px, py) >= 0:
                     break
                 put(0, px, py, PATH)
         if kind == "gas":
@@ -767,16 +904,16 @@ class World:
                 px, py = dx + nx * 2 + ny * o, dy + ny * 2 + nx * o
                 for oy in (-1, 0, 1):
                     for ox in (-1, 0, 1):
-                        if get(0, px + ox, py + oy) in (GRASS, TREE):
+                        if get(0, px + ox, py + oy) in (GRASS, SAND, SNOW, TREE):
                             put(0, px + ox, py + oy, CONCRETE)
                 put(0, px, py, PUMP)
         if kind in ("garage", "barn"):
             nx, ny = {"S": (0, 1), "N": (0, -1), "E": (1, 0), "W": (-1, 0)}[side]
             dx, dy = doors[1] if len(doors) > 1 else doors[0]
             tx, ty = dx + nx * 2, dy + ny * 2
-            if get(0, tx, ty) in (GRASS, SIDEWALK, CONCRETE, PATH):
+            if get(0, tx, ty) in (GRASS, SAND, SNOW, SIDEWALK, CONCRETE, PATH):
                 for k in range(1, 3):
-                    if get(0, dx + nx * k, dy + ny * k) in (GRASS, PATH):
+                    if get(0, dx + nx * k, dy + ny * k) in (GRASS, SAND, SNOW, PATH):
                         put(0, dx + nx * k, dy + ny * k, CONCRETE)
                 self._try_car(tx, ty, math.atan2(ny, nx))
         return b

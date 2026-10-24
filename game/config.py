@@ -2,7 +2,7 @@ import json
 import os
 import sys
 
-VERSION = "1.2.0"
+VERSION = "1.4.0"
 # Репозиторий для проверки обновлений: "ИМЯ_ПОЛЬЗОВАТЕЛЯ/ИМЯ_РЕПОЗИТОРИЯ".
 # Поменяйте на свой перед сборкой (или впишите "github_repo" в settings.json).
 GITHUB_REPO = "KIRILLTAN/vyzhivalka"
