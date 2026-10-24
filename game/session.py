@@ -57,6 +57,23 @@ class HostSession:
         edits = self.sim.world.export_edits() if self.sim else []
         return {"t": "start", "seed": self.seed, "diff": self.diff, "settings": self.settings, "edits": edits}
 
+    def set_setting(self, key, value):
+        """Меняет настройку прямо во время игры (только хост)."""
+        self.settings[key] = value
+        if self.sim:
+            self.sim.settings[key] = value
+            if key == "respawn":
+                for p in self.sim.players.values():
+                    if not p.alive:
+                        p.respawn_t = 0.0 if value else -1
+                if value:
+                    self.sim.over = False
+            self.sim._all({"k": "msg", "t": "Хост изменил настройку: %s - %s" % (
+                {"respawn": "возрождение", "keep_inv": "сохранение вещей при смерти"}.get(key, key),
+                "включено" if value else "выключено")})
+        elif self.server:
+            self.broadcast(self.lobby_msg())
+
     def save_game(self):
         if not self.sim or self.sim.over:
             return False

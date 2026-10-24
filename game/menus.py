@@ -171,6 +171,27 @@ class DifficultyMenu(MenuBase):
         ]
         self.saves = saves.list_saves()
         self.save_zones = []
+        prefs = load_prefs()
+        self.respawn = prefs.get("sp_respawn", False)
+        self.keep_inv = prefs.get("sp_keep_inv", False)
+        self.buttons += [
+            ui.Button((70, 385, 270, 50), "", lambda: self._toggle("respawn"), size=19),
+            ui.Button((940, 385, 270, 50), "", lambda: self._toggle("keep_inv"), size=19),
+        ]
+        self._labels()
+
+    def _labels(self):
+        self.buttons[2].label = "Возрождение: %s" % ("ВКЛ" if self.respawn else "ВЫКЛ")
+        self.buttons[2].color = (50, 100, 60) if self.respawn else (90, 50, 45)
+        self.buttons[3].label = "Сохранять вещи: %s" % ("ВКЛ" if self.keep_inv else "ВЫКЛ")
+        self.buttons[3].color = (50, 100, 60) if self.keep_inv else (90, 50, 45)
+
+    def _toggle(self, key):
+        setattr(self, key, not getattr(self, key))
+        p = load_prefs()
+        p["sp_" + key] = getattr(self, key)
+        save_prefs(p)
+        self._labels()
 
     def cards(self):
         out = []
@@ -193,8 +214,11 @@ class DifficultyMenu(MenuBase):
     def _start(self, slot=None):
         app, diff = self.app, self.sel
         try:
-            host = HostSession(self.name, diff, None if slot else default_settings(False), multiplayer=False,
-                               save_slot=slot)
+            settings = None
+            if not slot:
+                settings = default_settings(False)
+                settings.update(respawn=self.respawn, keep_inv=self.keep_inv)
+            host = HostSession(self.name, diff, settings, multiplayer=False, save_slot=slot)
         except (OSError, ValueError, KeyError) as ex:
             app.switch(MessageScene(app, "Не удалось загрузить сохранение: %s" % ex))
             return
@@ -214,6 +238,7 @@ class DifficultyMenu(MenuBase):
     def draw(self, screen):
         self.draw_bg(screen)
         ui.text(screen, "Одиночная игра", (CX, 50), 40, (230, 70, 55), bold=True, center=True)
+        ui.text(screen, "Эти настройки можно менять и в игре (Esc)", (CX, 88), 15, (170, 170, 170), center=True)
         self.save_zones = []
         ui.panel(screen, (70, 450, 1140, 255))
         ui.text(screen, "Сохранения", (90, 458), 22, bold=True)

@@ -157,8 +157,9 @@ class GameScene:
         self.bags = s["B"]
         self.weather = s.get("W", "clear")
         self.drops = s.get("D", [])
-        if s.get("over"):
-            self.over = True
+        self.over = bool(s.get("over"))
+        if "S" in s:
+            self.settings.update(s["S"])
         for e in s["ev"]:
             self._event(e)
 
@@ -303,6 +304,10 @@ class GameScene:
             self.host.close()
         self.link.close()
         self.app.switch(MessageScene(self.app, text) if text else MainMenu(self.app))
+
+    def _set_setting(self, key, value):
+        self.host.set_setting(key, value)
+        self.settings[key] = value
 
     def _save_now(self):
         if self.host and self.host.save_game():
@@ -1628,6 +1633,19 @@ class GameScene:
         if self.host:
             ui.text(screen, "Мир: %s (автосохранение каждые 90 сек)" % self.host.world_name, (cx, y + 70), 16,
                     (190, 190, 190), center=True)
+        # настройки смерти: менять может только хост (в одиночной игре - вы)
+        sx = SCREEN_W - 330
+        ui.panel(screen, (sx - 10, 170, 320, 190))
+        ui.text(screen, "Настройки смерти", (sx, 180), 20, (255, 220, 150), bold=True)
+        for i, (key, title) in enumerate((("respawn", "Возрождение"), ("keep_inv", "Сохранять вещи"))):
+            on = bool(self.settings.get(key))
+            r = pygame.Rect(sx, 215 + i * 56, 300, 46)
+            ui.Button(r, "%s: %s" % (title, "ВКЛ" if on else "ВЫКЛ"), size=19,
+                      color=(50, 100, 60) if on else (90, 50, 45), enabled=bool(self.host)).draw(screen)
+            if self.host:
+                self.zones.append((r, 1, lambda k=key, v=not on: self._set_setting(k, v)))
+        ui.text(screen, "Меняет только хост" if not self.host else "Действует сразу", (sx, 330), 14,
+                (170, 170, 170))
         if self.mp:
             y += 100
             ui.text(screen, "Игроки:", (cx - 200, y), 20, bold=True)

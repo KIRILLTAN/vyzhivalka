@@ -2045,4 +2045,5 @@ class Sim:
                 ev.append(e)
         return {"t": "s", "tod": round(self.tod, 4), "day": self.day, "P": P, "Z": Z, "N": N, "C": C, "B": B,
                 "me": me, "cont": cont, "ev": ev, "over": self.over, "W": self.weather,
+                "S": {"respawn": bool(self.settings.get("respawn")), "keep_inv": bool(self.settings.get("keep_inv"))},
                 "D": [[int(b.x), int(b.y)] for b in self.bags.values() if b.kind == "drop"]}
